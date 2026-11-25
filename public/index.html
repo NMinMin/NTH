@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="vi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>NTH Video — Không gian video của bạn</title><link rel="stylesheet" href="/style.css"><script defer src="/vendor/supabase.js"></script><script defer src="/video-quality.js"></script><script defer src="/app.js"></script></head>
+<html lang="vi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>NTH Video — Không gian video của bạn</title><link rel="stylesheet" href="/style.css"><script defer src="/vendor/supabase.js"></script><script defer src="/video-quality.js"></script><link rel="stylesheet" href="/file-browser.css"><script defer src="/file-browser.js"></script><script defer src="/app.js"></script></head>
 <body>
 <section id="authView" class="auth-shell">
  <div class="intro"><a class="brand" href="/">◈ NTH<span>VIDEO</span></a><div><span class="eyebrow">YOUR MOMENTS, ORIGINAL QUALITY</span><h1>Mọi khoảnh khắc.<br>Trọn từng chi tiết.</h1><p>Một không gian riêng cho video của bạn.<br>Lưu trữ, sắp xếp và xem lại với chất lượng gốc.</p><div class="quality">4K <span>PHÁT VIDEO GỐC</span></div></div><small>Video của bạn. Không gian của bạn.</small></div>
@@ -11,15 +11,53 @@
  </div>
  </div><button class="primary" id="authSubmit">Đăng nhập</button><button type="button" id="switchAuth" class="text-button">Chưa có tài khoản? Đăng ký</button><p id="authMessage" role="status"></p></form>
 </section>
-<div id="appView" hidden>
- <aside><a href="/" class="brand">◈ NTH<span>VIDEO</span></a><div class="workspace-label">KHÔNG GIAN CỦA BẠN</div><button id="allVideos" class="nav active">▦ &nbsp; Tất cả video <span id="totalCount">0</span></button><div class="folder-heading">THƯ MỤC <button id="newFolder" aria-label="Tạo thư mục">＋</button></div><nav id="folderNav"></nav><div class="aside-bottom"><div class="original-note">◈ &nbsp; Chất lượng nguyên bản<small>Giữ nguyên từng khung hình.</small></div><div class="account"><span id="accountEmail"></span><button id="logout">Đăng xuất</button></div></div></aside>
- <div class="main-shell"><header><span>Thư viện cá nhân</span><span class="private-tag">♧ &nbsp; Riêng tư</span></header><main><div class="page-heading"><div><span class="eyebrow">VIDEO LIBRARY</span><h1 id="pageTitle">Tất cả video</h1><p>Lưu giữ điều bạn muốn xem lại.</p></div><button id="uploadButton" class="primary">＋ &nbsp; Tải video lên</button></div>
- <div class="stats"><div><span>Video trong thư viện</span><strong id="videoCount">0</strong></div><div><span>Dung lượng video</span><strong id="storageSize">0 MB</strong></div><div><span>Chất lượng lưu trữ</span><strong>Nguyên bản</strong></div></div>
- <section id="dropZone" tabindex="0" role="button" aria-label="Chọn hoặc kéo thả video để tải lên"><div class="upload-icon">↥</div><div><h3>Thả video vào đây để bắt đầu</h3><p>hoặc <span>chọn từ thiết bị</span> · MP4, WebM, MOV, MKV</p></div><span class="drop-badge">GIỮ NGUYÊN CHẤT LƯỢNG</span></section><input id="fileInput" type="file" accept="video/mp4,video/webm,video/quicktime,video/x-matroska,.mkv" multiple hidden>
- <section id="uploadPanel" hidden><strong id="uploadStatus"></strong><progress id="uploadProgress" max="100" value="0"></progress><small>Đợi thông báo hoàn tất trước khi đóng trang.</small></section>
- <div class="toolbar"><label class="search">⌕ <input id="search" placeholder="Tìm kiếm video…" aria-label="Tìm kiếm video"></label><label>Từ ngày <input id="fromDate" type="date"></label><label>Đến ngày <input id="toDate" type="date"></label><select id="sort" aria-label="Sắp xếp"><option value="new">Mới nhất</option><option value="old">Cũ nhất</option><option value="name">Tên A–Z</option></select><button id="clearFilters" title="Xóa bộ lọc">Đặt lại</button></div>
- <div class="section-heading"><h2>Video của bạn <span id="shownCount">0</span></h2><div class="folder-actions"><button id="renameFolder" hidden>Đổi tên thư mục</button><button id="shareFolder" hidden>Chia sẻ thư mục</button></div></div><div id="videoGrid" class="video-grid"></div><div id="emptyState" class="empty"><span>▷</span><h3>Không gian cho những thước phim của bạn</h3><p>Tải video đầu tiên lên hoặc điều chỉnh bộ lọc.</p></div>
- </main><footer>NTH VIDEO <span>Lưu nguyên bản. Xem trọn vẹn.</span></footer></div>
+<div id="appView" class="workspace" hidden>
+ <aside class="workspace-sidebar">
+  <a href="/" class="brand">▣ NTH<span>VIDEO</span></a>
+  <div class="workspace-create">
+   <button id="uploadButton" class="primary">↑ Tải video lên</button>
+   <button id="newFolder">＋ Thư mục mới</button>
+  </div>
+  <button id="allVideos" class="nav active">⌂ Trang chủ</button>
+  <h2 class="folder-heading">Thư mục của bạn</h2>
+  <nav id="folderNav" aria-label="Thư mục của bạn"></nav>
+  <div class="aside-bottom"><div class="account"><span id="accountEmail"></span><button id="logout">Đăng xuất</button></div></div>
+ </aside>
+ <div class="workspace-main">
+  <main class="file-surface">
+   <div class="page-heading">
+    <div>
+     <nav id="folderPath" class="folder-path" aria-label="Đường dẫn thư mục" hidden><button id="backHome">Trang chủ</button><span aria-hidden="true">/</span></nav>
+     <h1 id="pageTitle" tabindex="-1">Trang chủ</h1>
+    </div>
+    <div class="folder-actions"><button id="deleteFolder" class="file-danger" hidden>Xóa thư mục</button><button id="renameFolder" hidden>Đổi tên</button><button id="shareFolder" class="primary" hidden>Chia sẻ thư mục</button></div>
+   </div>
+   <div class="toolbar library-filters">
+    <label class="search"><span aria-hidden="true">⌕</span><input id="search" type="search" placeholder="Tìm video hoặc thư mục" aria-label="Tìm video hoặc thư mục"></label>
+    <label>Từ ngày <input id="fromDate" type="date"></label>
+    <label>Đến ngày <input id="toDate" type="date"></label>
+    <label>Sắp xếp <select id="sort"><option value="new">Mới nhất</option><option value="old">Cũ nhất</option><option value="name">Tên A–Z</option></select></label>
+    <button id="clearFilters">Đặt lại</button>
+   </div>
+   <input id="fileInput" type="file" accept="video/mp4,video/webm,video/quicktime,video/x-matroska,.mkv" multiple hidden>
+   <section id="uploadPanel" hidden><strong id="uploadStatus" role="status"></strong><progress id="uploadProgress" aria-label="Tiến độ tải lên" max="100" value="0"></progress></section>
+   <div class="browser-bar">
+    <p id="librarySummary" aria-live="polite"></p>
+    <div id="libraryLayout" class="layout-options" role="group" aria-label="Kiểu hiển thị">
+     <button type="button" data-layout="grid" aria-label="Dạng lưới" aria-pressed="true" title="Dạng lưới"><span class="grid-icon" aria-hidden="true"></span></button>
+     <button type="button" data-layout="list" aria-label="Dạng danh sách" aria-pressed="false" title="Dạng danh sách"><span class="list-icon" aria-hidden="true"></span></button>
+    </div>
+   </div>
+   <section id="folderSection" class="file-section" aria-labelledby="folderSectionTitle" hidden>
+    <h2 id="folderSectionTitle">Thư mục</h2><div id="folderGrid" class="file-grid"></div>
+   </section>
+   <section id="videoSection" class="file-section" aria-labelledby="videoSectionTitle" hidden>
+    <h2 id="videoSectionTitle">Video đã tải lên</h2><div id="videoGrid" class="file-grid"></div>
+   </section>
+   <p id="emptyState" class="browser-empty" hidden></p>
+   <button id="dropZone" type="button" class="compact-drop">↑ Kéo thả video vào đây hoặc chọn từ thiết bị</button>
+  </main>
+ </div>
 </div>
 <dialog id="playerDialog" aria-labelledby="playerTitle"><div class="dialog-heading"><h2 id="playerTitle"></h2><button id="closePlayer" aria-label="Đóng trình phát">✕</button></div><video id="player" controls playsinline preload="metadata"></video><div class="player-toolbar"><p id="playerNote" role="status"></p><div class="player-actions"><button id="playerFullscreen" type="button" hidden>Toàn màn hình</button><button id="playerDownload" class="primary">Tải bản gốc</button></div></div></dialog>
 <dialog id="nameDialog"><form id="nameForm"><h2 id="nameTitle">Tạo thư mục</h2><label>Tên<input id="nameInput" required maxlength="180"></label><div class="dialog-actions"><button type="button" id="cancelName">Hủy</button><button class="primary">Lưu</button></div></form></dialog><div id="toast" role="status" hidden></div>

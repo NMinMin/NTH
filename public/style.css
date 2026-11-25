@@ -13,11 +13,6 @@
 #shareDialog{max-width:520px}
 #shareStatus{font-size:.875rem}
 .card-actions{flex-wrap:wrap}
-.watch-page{background:#142525;color:#f1f8f4;min-height:100vh}
-.watch-shell{max-width:1280px;padding:clamp(20px,4vw,48px)}
-.watch-shell .brand{color:#f1f8f4;margin-bottom:32px}
-.watch-shell h1{overflow-wrap:anywhere}
-.watch-shell p{color:#c4d4ce;margin-top:12px}
 #sharedPlayer{display:block;max-height:75vh}
 #sharedPlayer:fullscreen{width:100%;height:100%;max-height:none;object-fit:contain}
 
@@ -30,6 +25,5 @@
 #togglePassword{position:absolute;right:6px;top:50%;transform:translateY(-50%);border:0;padding:6px 10px;color:#087d69;font-size:.875rem}
 
 .folder-actions{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}
-#sharedFolderFiles{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:24px}
-#sharedFolderFiles button[aria-pressed="true"]{background:#087d69;color:white;border-color:#087d69}
-#sharedVideoTitle{overflow-wrap:anywhere}
+
+.card-actions .delete-video{color:#a73529}

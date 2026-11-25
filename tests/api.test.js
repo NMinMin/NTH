@@ -15,6 +15,7 @@ test('API permissions and cross-part streaming',async t=>{
  assert.equal((await fetch(base+'/api/library',{headers:{Authorization:'Bearer invalid-token'}})).status,401);
  assert.equal((await fetch(base+'/api/videos',{method:'POST'})).status,401);
  const library=await (await fetch(base+'/api/library',{headers})).json();assert.equal(library.videos[0].id,id);
+ assert.equal(library.videos[0].name,'Nghịch Thủy Hàn.mp4');
  const response=await fetch(base+'/api/videos/'+id+'/link',{headers});assert.equal(response.status,200);
  const {url}=await response.json();
  const full=await fetch(base+url);assert.equal(full.status,200);assert.equal(await full.text(),'abcdefghij');
@@ -37,15 +38,27 @@ test('API permissions and cross-part streaming',async t=>{
  assert.equal((await fetch(base+'/api/videos',{method:'POST',headers,body:unsupported})).status,400);
  const publicRepoUpload = new FormData();
  publicRepoUpload.append('video', new Blob(['abc'], {type:'video/mp4'}), 'private.mp4');
+ const missingRepo = await fetch(base+'/api/videos', {method:'POST',headers,body:publicRepoUpload});
+ assert.equal(missingRepo.status,502);
+ assert.match((await missingRepo.json()).error,/GITHUB_OWNER.*GITHUB_REPO.*Contents: Read and write/);
  const blocked = await fetch(base+'/api/videos', {method:'POST',headers,body:publicRepoUpload});
  assert.equal(blocked.status,409);
  assert.match((await blocked.json()).error,/Private/);
  const input=Buffer.alloc(20*1024*1024+17,65);input.write('CROSS-PART-END',20*1024*1024-3);
- const form=new FormData();form.append('video',new Blob([input],{type:'video/mp4'}),'upload.mp4');form.append('folderId',folder.id);
+ const form=new FormData();
+ const originalName = 'Thử video 4K – tiếng Việt.mp4';
+ form.append('fileName', originalName);
+ form.append('folderId',folder.id);
+ form.append('width','3840');
+ form.append('height','2160');
+ form.append('duration','91');
+ form.append('video',new Blob([input],{type:'video/mp4'}),'upload.mp4');
  const uploaded=await fetch(base+'/api/videos',{method:'POST',headers,body:form});assert.equal(uploaded.status,201,await uploaded.clone().text());
  const uploadedId=(await uploaded.json()).id;
  const uploadedLink=await(await fetch(base+'/api/videos/'+uploadedId+'/link',{headers})).json();
  const replay=await fetch(base+uploadedLink.url);assert.deepEqual(Buffer.from(await replay.arrayBuffer()),input);
+ const originalDownload = await fetch(base+uploadedLink.url+'&download=1',{method:'HEAD'});
+ assert.equal(decodeURIComponent(originalDownload.headers.get('content-disposition').split("UTF-8''")[1]),originalName);
  const uploadedRange=await fetch(base+uploadedLink.url,{headers:{Range:'bytes='+String(20*1024*1024-3)+'-'+String(20*1024*1024+10)}});
  assert.equal(await uploadedRange.text(),'CROSS-PART-END');
  const renameVideo=await fetch(base+'/api/videos/'+uploadedId,{method:'PATCH',headers:{...headers,'Content-Type':'application/json'},body:JSON.stringify({name:'New name.mp4'})});assert.equal(renameVideo.status,200);
@@ -70,7 +83,7 @@ test('API permissions and cross-part streaming',async t=>{
  const sharedEndpoint = base + '/api/shared/' + share.path.split('#')[1];
  const sharedInfo = await fetch(sharedEndpoint);
  assert.match(sharedInfo.headers.get('cache-control'),/no-store/);
- assert.deepEqual(await sharedInfo.json(),{name:'test.mp4'});
+ assert.deepEqual(await sharedInfo.json(),{name:'Nghịch Thủy Hàn.mp4'});
  const sharedRange = await fetch(sharedEndpoint+'/media',{headers:{Range:'bytes=3-7'}});
  assert.equal(sharedRange.status,206);
  assert.equal(await sharedRange.text(),'defgh');
@@ -78,7 +91,7 @@ test('API permissions and cross-part streaming',async t=>{
  const downloadUrl = sharedEndpoint + '/media?download=1';
  const sharedDownload = await fetch(downloadUrl);
  assert.equal(sharedDownload.status,200);
- assert.match(sharedDownload.headers.get('content-disposition'),/^attachment;.*test\.mp4$/);
+ assert.equal(decodeURIComponent(sharedDownload.headers.get('content-disposition').split("UTF-8''")[1]),'Nghịch Thủy Hàn.mp4');
  assert.equal(await sharedDownload.text(),'abcdefghij');
  assert.equal((await fetch(shareEndpoint,{method:'DELETE',headers})).status,200);
  assert.equal((await fetch(sharedEndpoint)).status,404);
@@ -100,7 +113,7 @@ test('API permissions and cross-part streaming',async t=>{
  const sharedFolderUrl = base + '/api/shared-folders/' + folderShare.path.split('#')[1];
  const folderInfo = await fetch(sharedFolderUrl);
  assert.equal(folderInfo.status,200);
- assert.deepEqual(await folderInfo.json(),{name:'Đã đổi tên',videos:[{name:'New name.mp4',id:uploadedId}]});
+ assert.deepEqual(await folderInfo.json(),{name:'Đã đổi tên',videos:[{name:'New name.mp4',id:uploadedId,size:input.length,width:3840,height:2160,duration:91}]});
  const folderMedia = sharedFolderUrl + '/videos/' + uploadedId + '/media';
  const folderDownload = await fetch(folderMedia+'?download=1',{headers:{Range:'bytes=0-2'}});
  assert.equal(folderDownload.status,206);
@@ -112,6 +125,62 @@ test('API permissions and cross-part streaming',async t=>{
  assert.equal((await fetch(folderMedia)).status,404);
  assert.equal((await fetch(folderMedia+'?download=1')).status,404);
  assert.equal((await fetch(base+'/api/shared/'+recreated.path.split('#')[1])).status,200);
+
+ // A folder deletion cleans up every GitHub video and can resume after a partial failure.
+ const secondVideo = new FormData();
+ secondVideo.append('folderId',folder.id);
+ secondVideo.append('video',new Blob(['another video'],{type:'video/mp4'}),'Second.mp4');
+ const secondUpload = await fetch(base+'/api/videos',{method:'POST',headers,body:secondVideo});
+ assert.equal(secondUpload.status,201);
+ const secondVideoId = (await secondUpload.json()).id;
+
+ const renewedFolderShare = await (await fetch(folderShareEndpoint,{method:'POST',headers})).json();
+ const activeFolderUrl = base + '/api/shared-folders/' + renewedFolderShare.path.split('#')[1];
+ const activeVideoShare = await (await fetch(base+'/api/videos/'+uploadedId+'/share',{method:'POST',headers})).json();
+ const activeVideoUrl = base + '/api/shared/' + activeVideoShare.path.split('#')[1];
+ const folderEndpoint = base + '/api/folders/' + folder.id;
+ assert.equal((await fetch(folderEndpoint,{method:'DELETE'})).status,401);
+ assert.equal((await fetch(folderEndpoint,{method:'DELETE',headers:otherHeaders})).status,404);
+ assert.equal((await fetch(activeFolderUrl)).status,200);
+ assert.equal((await fetch(activeVideoUrl)).status,200);
+ const incomplete = await fetch(folderEndpoint,{method:'DELETE',headers});
+ assert.equal(incomplete.status,502);
+ const retryLibrary = await (await fetch(base+'/api/library',{headers})).json();
+ assert.ok(retryLibrary.folders.some(item => item.id === folder.id));
+ assert.equal(retryLibrary.videos.find(video=>video.id===uploadedId).status,'deleting');
+ assert.equal((await fetch(activeVideoUrl)).status,404);
+ assert.equal((await fetch(base+uploadedLink.url,{method:'HEAD'})).status,404);
+
+ const deletedFolder = await fetch(folderEndpoint,{method:'DELETE',headers});
+ assert.equal(deletedFolder.status,200);
+ assert.deepEqual(await deletedFolder.json(),{ok:true});
+ assert.equal((await fetch(folderEndpoint,{method:'DELETE',headers})).status,404);
+ assert.equal((await fetch(activeFolderUrl)).status,404);
+ assert.equal((await fetch(activeFolderUrl+'/videos/'+uploadedId+'/media')).status,404);
+ const deletedLibrary = await (await fetch(base+'/api/library',{headers})).json();
+ assert.ok(!deletedLibrary.folders.some(item => item.id === folder.id));
+ assert.ok(!deletedLibrary.videos.some(video => [uploadedId, secondVideoId].includes(video.id)));
+ assert.equal((await fetch(base+'/api/shared/'+recreated.path.split('#')[1])).status,200);
+
+ const oldClient = new FormData();
+ oldClient.append('video',new Blob(['abc'], {type:'video/mp4'}),'Cà phê Sài Gòn.mp4');
+ const oldClientUpload = await fetch(base+'/api/videos',{method:'POST',headers,body:oldClient});
+ assert.equal(oldClientUpload.status,201);
+ const oldClientId = (await oldClientUpload.json()).id;
+ const updatedLibrary = await (await fetch(base+'/api/library',{headers})).json();
+ assert.equal(updatedLibrary.videos.find(video=>video.id===oldClientId).name,'Cà phê Sài Gòn.mp4');
+ const videoEndpoint = base + '/api/videos/' + oldClientId;
+ const singleShare = await (await fetch(videoEndpoint+'/share',{method:'POST',headers})).json();
+ const singleShareUrl = base + '/api/shared/' + singleShare.path.split('#')[1];
+ assert.equal((await fetch(videoEndpoint,{method:'DELETE'})).status,401);
+ assert.equal((await fetch(videoEndpoint,{method:'DELETE',headers:otherHeaders})).status,404);
+ assert.equal((await fetch(singleShareUrl)).status,200);
+ assert.equal((await fetch(videoEndpoint,{method:'DELETE',headers})).status,200);
+ assert.equal((await fetch(singleShareUrl)).status,404);
+ assert.equal((await fetch(videoEndpoint,{method:'DELETE',headers})).status,404);
+ const finalLibrary = await (await fetch(base+'/api/library',{headers})).json();
+ assert.ok(!finalLibrary.videos.some(video => video.id === oldClientId));
+
  const vendor=await fetch(base+'/vendor/supabase.js');assert.equal(vendor.status,200);
  assert.match(await (await fetch(base+'/')).text(),/NTH Video/);
 });

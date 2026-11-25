@@ -9,50 +9,166 @@ async function api(url,options={}){
  if(!r.ok){let d;try{d=await r.json()}catch{}throw Error(d?.error||'Không thể xử lý yêu cầu ('+r.status+').')}
  return r.json();
 }
-const bytes=n=>n>=1073741824?(n/1073741824).toFixed(2)+' GB':(n/1048576).toFixed(1)+' MB';
-function element(tag,cls,text){const e=document.createElement(tag);if(cls)e.className=cls;if(text!==undefined)e.textContent=text;return e}
-function selectFolder(id){folder=id;render()}
-function render(){
- $('pageTitle').textContent=library.folders.find(f=>f.id===folder)?.name||'Tất cả video';
- $('renameFolder').hidden=!folder;
- $('shareFolder').hidden=!folder;
- $('folderNav').replaceChildren();
- for(const f of library.folders){const b=element('button','nav'+(folder===f.id?' active':''),'▱  '+f.name);b.onclick=()=>selectFolder(f.id);$('folderNav').append(b)}
- $('allVideos').classList.toggle('active',!folder);
- const ready=library.videos.filter(v=>v.status==='ready');
- $('totalCount').textContent=ready.length;$('videoCount').textContent=ready.length;$('storageSize').textContent=bytes(ready.reduce((n,v)=>n+Number(v.size),0));
- let list=library.videos.filter(v=>(!folder||v.folder_id===folder)&&v.name.toLocaleLowerCase().includes($('search').value.toLocaleLowerCase()));
- const from=$('fromDate').value,to=$('toDate').value;
- list=list.filter(v=>{const d=new Date(v.created_at);const date=[d.getFullYear(),String(d.getMonth()+1).padStart(2,'0'),String(d.getDate()).padStart(2,'0')].join('-');return(!from||date>=from)&&(!to||date<=to)});
- list.sort((a,b)=>$('sort').value==='name'?a.name.localeCompare(b.name,'vi'):($('sort').value==='old'?1:-1)*(new Date(a.created_at)-new Date(b.created_at)));
- $('shownCount').textContent=list.length;$('videoGrid').replaceChildren();$('emptyState').hidden=!!list.length;
- for(const v of list){
-  const card=element('article','video-card'),thumb=element('button','thumbnail');thumb.setAttribute('aria-label','Xem '+v.name);
-  thumb.append(element('span','play','▷'),element('span','resolution',videoQuality(v.width,v.height)),element('span','duration',v.duration?Math.floor(v.duration/60)+':'+String(Math.floor(v.duration%60)).padStart(2,'0'):'VIDEO'));
-  thumb.disabled=v.status!=='ready';thumb.onclick=()=>play(v).catch(fail);
-  const info=element('div','video-info'),title=element('h3','',v.name);title.title=v.name;
-  const state=v.status==='failed'?' · Tải thất bại':v.status==='uploading'?' · Đang lưu':'';
-  info.append(title,element('div','meta',new Date(v.created_at).toLocaleDateString('vi-VN')+' · '+bytes(v.size)+state));
-  const actions=element('div','card-actions'),rename=element('button','','Đổi tên'),download=element('button','','↓ Tải bản gốc');
-  rename.onclick=()=>askName('Đổi tên video',v.name,async name=>{await api('/videos/'+v.id,{method:'PATCH',body:JSON.stringify({name})});await load()});
-  download.disabled=v.status!=='ready';download.onclick=()=>downloadVideo(v).catch(fail);
-  const share = element('button', '', 'Chia sẻ');
-  share.disabled = v.status !== 'ready';
-  share.onclick = () => openSharing(v).catch(fail);
-  actions.append(rename, share, download);info.append(actions);card.append(thumb,info);$('videoGrid').append(card);
+const {element, card, videoCard, bindLayout} = fileBrowser;
+bindLayout($('libraryLayout'), $('folderGrid'), $('videoGrid'));
+
+function selectFolder(id) {
+ folder = id;
+ $('search').value = '';
+ render();
+ $('pageTitle').focus();
+}
+
+const pendingFolderDeletes = new Set();
+
+async function deleteFolder(item, button) {
+ if (pendingFolderDeletes.has(item.id)) return;
+ if (!window.confirm('Xóa thư mục "' + item.name + '" và toàn bộ video bên trong khỏi thư viện và nhánh lưu trữ trên GitHub? Các link chia sẻ sẽ ngừng hoạt động.')) return;
+
+ pendingFolderDeletes.add(item.id);
+ button.disabled = true;
+ try {
+  await api('/folders/' + item.id, {method:'DELETE'});
+  library.folders = library.folders.filter(entry => entry.id !== item.id);
+  library.videos = library.videos.filter(video => video.folder_id !== item.id);
+  if (folder === item.id) selectFolder(null);
+  else render();
+  toast('Đã xóa thư mục và video bên trong khỏi thư viện và nhánh lưu trữ trên GitHub.');
+ } catch (error) {
+  await load().catch(() => {});
+  fail(error);
+ } finally {
+  pendingFolderDeletes.delete(item.id);
+  button.disabled = false;
  }
 }
-async function load(){library=await api('/library');render()}
+
+function renameFolder(item) {
+ askName('Đổi tên thư mục', item.name, async name => {
+  await api('/folders/' + item.id, {method:'PATCH', body:JSON.stringify({name})});
+  await load();
+ });
+}
+
+function render() {
+ const selected = library.folders.find(item => item.id === folder);
+ $('pageTitle').textContent = selected?.name || 'Trang chủ';
+ $('folderPath').hidden = !selected;
+ $('renameFolder').hidden = !selected;
+ $('shareFolder').hidden = !selected;
+ $('deleteFolder').hidden = !selected;
+ $('search').placeholder = selected ? 'Tìm video trong thư mục' : 'Tìm video hoặc thư mục';
+ $('search').setAttribute('aria-label', $('search').placeholder);
+ $('videoSectionTitle').textContent = selected ? 'Video trong thư mục' : 'Video đã tải lên';
+
+ const home = $('allVideos');
+ home.classList.toggle('active', !selected);
+ home.setAttribute('aria-current', selected ? 'false' : 'page');
+ const navigation = library.folders.map(item => {
+  const active = item.id === folder;
+  const button = element('button', 'nav' + (active ? ' active' : ''), item.name);
+  button.title = item.name;
+  button.setAttribute('aria-current', active ? 'page' : 'false');
+  button.onclick = () => selectFolder(item.id);
+  return button;
+ });
+ $('folderNav').replaceChildren(...navigation);
+
+ const search = $('search').value.trim().toLocaleLowerCase('vi');
+ const matches = name => name.toLocaleLowerCase('vi').includes(search);
+ const folders = selected ? [] : library.folders.filter(item => matches(item.name));
+ const from = $('fromDate').value;
+ const to = $('toDate').value;
+ const sort = $('sort').value;
+ const folderNames = new Map(library.folders.map(item => [item.id, item.name]));
+ const counts = new Map();
+ const videos = library.videos.filter(video => {
+  counts.set(video.folder_id, (counts.get(video.folder_id) || 0) + 1);
+  if ((selected && video.folder_id !== folder) || !matches(video.name)) return false;
+  const date = new Date(video.created_at);
+  const localDate = [date.getFullYear(), String(date.getMonth() + 1).padStart(2, '0'), String(date.getDate()).padStart(2, '0')].join('-');
+  return (!from || localDate >= from) && (!to || localDate <= to);
+ });
+ videos.sort((a, b) => sort === 'name' ? a.name.localeCompare(b.name, 'vi')
+  : (sort === 'old' ? 1 : -1) * (new Date(a.created_at) - new Date(b.created_at)));
+
+ $('librarySummary').textContent = (selected ? '' : folders.length + ' thư mục · ') + videos.length + ' video';
+ $('folderSection').hidden = !folders.length;
+ $('folderGrid').replaceChildren(...folders.map(item => card({
+  name:item.name, type:'folder', meta:(counts.get(item.id) || 0) + ' video',
+  open:() => selectFolder(item.id),
+  options:[
+   {label:'Đổi tên', action:() => renameFolder(item)},
+   {label:'Chia sẻ', action:() => openSharing(item, 'folders').catch(fail)},
+   {label:'Xóa thư mục', danger:true, action:button => deleteFolder(item, button)}
+  ]
+ })));
+ $('videoSection').hidden = !videos.length;
+ $('videoGrid').replaceChildren(...videos.map(video => {
+  const ready = video.status === 'ready';
+  const states = {failed:'Tải thất bại', uploading:'Đang lưu', deleting:'Đang xóa dở'};
+  const extra = [!selected && folderNames.get(video.folder_id), states[video.status]].filter(Boolean).join(' · ');
+  return videoCard(video, {
+   extra,
+   open:ready && (() => play(video).catch(fail)),
+   options:[
+    {label:'Đổi tên', disabled:video.status === 'deleting', action:() => askName('Đổi tên video', video.name, async name => {
+     await api('/videos/' + video.id, {method:'PATCH', body:JSON.stringify({name})});
+     await load();
+    })},
+    {label:'Chia sẻ', disabled:!ready, action:() => openSharing(video).catch(fail)},
+    {label:'Tải bản gốc', disabled:!ready, action:() => downloadVideo(video).catch(fail)},
+    {label:video.status === 'deleting' ? 'Thử xóa lại' : 'Xóa video', danger:true,
+     action:button => deleteVideo(video, button)}
+   ]
+  });
+ }));
+ const empty = $('emptyState');
+ empty.hidden = !!(folders.length || videos.length);
+ empty.textContent = search || from || to ? 'Không tìm thấy mục phù hợp.'
+  : selected ? 'Thư mục này chưa có video.' : 'Hãy tải video lên hoặc tạo thư mục để bắt đầu.';
+}
+
+async function deleteVideo(video, button) {
+ if (video.status !== 'deleting' && !window.confirm(
+  'Xóa “' + video.name + '” khỏi thư viện và nhánh lưu trữ trên GitHub? Link chia sẻ của video sẽ ngừng hoạt động.'
+ )) return;
+
+ button.disabled = true;
+ try {
+  await api('/videos/' + video.id, {method:'DELETE'});
+  library.videos = library.videos.filter(item => item.id !== video.id);
+  render();
+  toast('Đã xóa video khỏi thư viện và nhánh lưu trữ trên GitHub.');
+ } catch (error) {
+  await load().catch(() => {});
+  fail(error);
+ } finally {
+  button.disabled = false;
+ }
+}
+async function load() {
+ library = await api('/library');
+ if (folder && !library.folders.some(item => item.id === folder)) folder = null;
+ render();
+}
 function askName(title,value,action){naming=action;$('nameTitle').textContent=title;$('nameInput').value=value;$('nameDialog').showModal();$('nameInput').focus()}
 $('nameForm').onsubmit=async e=>{e.preventDefault();const b=e.submitter;b.disabled=true;try{await naming($('nameInput').value.trim());$('nameDialog').close()}catch(e){fail(e)}finally{b.disabled=false}};
 $('cancelName').onclick=()=>$('nameDialog').close();
-$('newFolder').onclick=()=>askName('Tạo thư mục','',async name=>{const f=await api('/folders',{method:'POST',body:JSON.stringify({name})});folder=f.id;await load()});
-$('renameFolder').onclick=()=>askName('Đổi tên thư mục',library.folders.find(f=>f.id===folder).name,async name=>{await api('/folders/'+folder,{method:'PATCH',body:JSON.stringify({name})});await load()});
+$('newFolder').onclick=()=>askName('Tạo thư mục','',async name=>{const f=await api('/folders',{method:'POST',body:JSON.stringify({name})});folder=f.id;$('search').value='';await load();$('pageTitle').focus()});
+$('renameFolder').onclick = () => {
+ const selected = library.folders.find(item => item.id === folder);
+ if (selected) renameFolder(selected);
+};
 $('shareFolder').onclick = () => {
  const selected = library.folders.find(item => item.id === folder);
  if (selected) openSharing(selected, 'folders').catch(fail);
 };
-$('allVideos').onclick=()=>selectFolder(null);
+$('deleteFolder').onclick = event => {
+ const selected = library.folders.find(item => item.id === folder);
+ if (selected) deleteFolder(selected, event.currentTarget);
+};
+$('allVideos').onclick = $('backHome').onclick = () => selectFolder(null);
 for(const id of ['search','fromDate','toDate','sort'])$(id).addEventListener('input',render);
 $('clearFilters').onclick=()=>{$('search').value='';$('fromDate').value='';$('toDate').value='';$('sort').value='new';render()};
 const shareDialog = $('shareDialog');
@@ -166,14 +282,18 @@ async function uploadFiles(files){
   const mime=file.type||(/\.mkv$/i.test(file.name)?'video/x-matroska':'');
   if(!['video/mp4','video/webm','video/quicktime','video/x-matroska'].includes(mime)){toast('Định dạng không hỗ trợ: '+file.name);continue}
   $('uploadStatus').textContent='Đang tải '+file.name;$('uploadProgress').value=0;
-  const meta=await metadata(file),data=new FormData();data.append('video',new Blob([file],{type:mime}),file.name);if(targetFolder)data.append('folderId',targetFolder);for(const [key,value]of Object.entries(meta))data.append(key,value);
+  const meta = await metadata(file);
+  const data = new FormData();
+  data.append('fileName', file.name);
+  if (targetFolder) data.append('folderId', targetFolder);
+  for (const [key, value] of Object.entries(meta)) data.append(key, value);
+  data.append('video', new Blob([file], {type:mime}), file.name);
   try{await uploadOne(data,await token());success++}catch(e){toast(file.name+': '+e.message)}
  }$('uploadStatus').textContent='Hoàn tất '+success+'/'+files.length+' video.';await load();
  }catch(e){fail(e)}finally{busy=false;$('uploadButton').disabled=false;$('fileInput').value=''}
 }
 $('uploadButton').onclick=()=>$('fileInput').click();
 $('dropZone').onclick=()=>$('fileInput').click();
-$('dropZone').onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();$('fileInput').click()}};
 $('fileInput').onchange=e=>uploadFiles([...e.target.files]);
 for(const type of ['dragenter','dragover'])$('dropZone').addEventListener(type,e=>{e.preventDefault();$('dropZone').classList.add('drag')});
 $('dropZone').addEventListener('dragleave',()=>$('dropZone').classList.remove('drag'));

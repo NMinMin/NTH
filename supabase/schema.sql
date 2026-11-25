@@ -12,7 +12,7 @@ create table public.videos (
  name text not null check (length(trim(name)) between 1 and 180),
  mime text not null, size bigint not null check(size>0),
  width integer, height integer, duration double precision,
- status text not null default 'uploading' check(status in ('uploading','ready','failed')),
+ status text not null default 'uploading' check(status in ('uploading','ready','failed','deleting')),
  chunks jsonb not null default '[]',
  share_token text,
  created_at timestamptz not null default now(),

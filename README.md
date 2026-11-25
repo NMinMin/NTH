@@ -6,6 +6,8 @@ Web quản lý video tiếng Việt, frontend HTML/CSS/JS và API Node.js/Expres
 - Thư viện riêng theo tài khoản; API xác thực JWT bằng Supabase getUser, database bật RLS.
 - Kéo thả/chọn nhiều video, tiến trình tải, tạo và đổi tên thư mục, đổi tên hiển thị video.
 - Chia sẻ từng video hoặc cả thư mục bằng link xem và tải bản gốc, kể cả 4K. Chủ video hoặc thư mục có thể thu hồi link.
+- Xóa thư mục và toàn bộ video bên trong khỏi thư viện và nhánh lưu trữ GitHub. Nếu xóa dở, thử xóa lại thư mục để tiếp tục.
+- Xóa video khỏi thư viện và nhánh lưu trữ GitHub. Nếu lỗi giữa chừng, có thể thử xóa lại.
 - Tìm tên, lọc khoảng ngày upload theo múi giờ thiết bị, sắp xếp tên/mới/cũ.
 - Xem chất lượng gốc, tua bằng HTTP Range; tải xuống đúng byte gốc, không nén lại.
 - Video lớn chia thành phần 20 MiB, proxy ghép luồng từ GitHub. Giới hạn upload mặc định 2048 MiB/file.
@@ -13,7 +15,7 @@ Web quản lý video tiếng Việt, frontend HTML/CSS/JS và API Node.js/Expres
 
 ## 1. Chuẩn bị Supabase
 1. Mở SQL Editor trong project kqmvhtuhneklsgwfaeds, chạy toàn bộ supabase/schema.sql một lần.
-   Nếu đã chạy schema cũ, chạy supabase/add-video-sharing.sql để chia sẻ video và supabase/add-folder-sharing.sql để chia sẻ thư mục.
+   Nếu đã chạy schema cũ, chạy supabase/add-video-sharing.sql để chia sẻ video và supabase/add-folder-sharing.sql để chia sẻ thư mục. Chạy supabase/add-video-deletion.sql để bật xóa video và chạy bản mới nhất của supabase/add-folder-deletion.sql để thư mục chỉ được gỡ sau khi video bên trong đã được xóa.
 2. Authentication > Sign In / Providers: bật Email và Allow new users to sign up, tắt Confirm email để đăng ký xong vào thư viện ngay.
 3. Authentication > URL Configuration: đặt Site URL thành URL Render sau deploy và thêm URL đó trong Redirect URLs; local dùng http://localhost:3000.
 4. Settings > API keys: lấy backend secret key (sb_secret_...) hoặc legacy service_role key. Điền vào SUPABASE_SERVICE_ROLE_KEY, tuyệt đối không đưa vào frontend/Git.
@@ -57,7 +59,9 @@ Blueprint chọn plan starter; có thể đổi plan. Render cần dung lượng
 | GET | /api/library | Danh sách folder và metadata thuộc user |
 | POST | /api/folders | JSON {name} |
 | PATCH | /api/folders/:id | JSON {name} |
+| DELETE | /api/folders/:id | Xóa video trong thư mục khỏi nhánh GitHub, sau đó xóa video và thư mục khỏi thư viện |
 | PATCH | /api/videos/:id | JSON {name} |
+| DELETE | /api/videos/:id | Xóa các phần trên nhánh GitHub rồi xóa video khỏi thư viện |
 | POST | /api/videos | multipart: video; folderId, width, height, duration tùy chọn |
 | GET | /api/videos/:id/link | Cấp URL phát/tải có chữ ký, hiệu lực 6 giờ |
 | GET | /api/media/:id?... | Luồng video; hỗ trợ Range, &download=1 |
@@ -96,6 +100,7 @@ Tests kiểm tra HMAC, hết hạn, chống truy cập chéo tài khoản, HTTP 
 - Chia file không tránh chính sách/giới hạn tổng dung lượng repo của GitHub. Dùng cho thư viện nhỏ/cá nhân; với quy mô lớn nên chuyển storage video sang R2/S3/Supabase Storage.
 - Upload qua đĩa tạm rồi ghi GitHub; chưa có resume upload khi mạng mất/Render restart. Đừng đóng trang trước thông báo hoàn tất.
 - Upload lỗi được đánh dấu failed, phần đã ghi vẫn nằm trên GitHub và metadata để kiểm tra thủ công. Restart giữa upload có thể để lại uploading và file tạm. Không có tác vụ dọn orphan tự động.
+- Xóa video tạo commit gỡ các file .part khỏi nhánh lưu trữ. Các commit cũ vẫn có thể chứa video.
 - Đổi tên chỉ sửa metadata, không di chuyển/đổi tên các .part vật lý. Mỗi user có thư mục một cấp; không có thư mục lồng nhau.
-- Không có transcoding/HLS, kiểm tra codec phía server, tạo thumbnail thật, xóa tài khoản hay xóa video. Kích thước/codec hiển thị do trình duyệt đọc, không phải thông tin đã được server kiểm chứng.
+- Không có transcoding/HLS, kiểm tra codec phía server, tạo thumbnail thật, hay xóa tài khoản. Kích thước/codec hiển thị do trình duyệt đọc, không phải thông tin đã được server kiểm chứng.
 - Chưa deploy hoặc chạy SQL trên Supabase thật: cần khóa backend và cấu hình GitHub của chủ tài khoản.

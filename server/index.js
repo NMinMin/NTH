@@ -10,7 +10,7 @@ import {randomBytes,randomUUID} from 'node:crypto';
 import {once} from 'node:events';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {putChunk,getChunk,isPrivateVideoRepo} from './github.js';
+import {putChunk,getChunk,isPrivateVideoRepo,videoDirectory,deleteVideoChunks,checkVideoBranch,GitHubRequestError} from './github.js';
 import {sign,verify,rangeOf} from './media.js';
 const required=['SUPABASE_URL','SUPABASE_PUBLISHABLE_KEY','SUPABASE_SERVICE_ROLE_KEY','GITHUB_TOKEN','GITHUB_OWNER','GITHUB_REPO','MEDIA_SIGNING_SECRET','APP_ORIGIN'];
 for(const key of required)if(!process.env[key])throw Error('Missing '+key);
@@ -34,10 +34,22 @@ async function auth(req,res,next){
 }
 const check=(r)=>{if(r.error)throw Error('Không thể lưu dữ liệu: '+r.error.message);return r.data};
 const nameOf=(value)=>{if(typeof value!=='string'||!value.trim()||value.trim().length>180){const e=Error('Tên phải từ 1 đến 180 ký tự.');e.status=400;throw e}return value.trim()};
+const filenameDecoder = new TextDecoder('utf-8', {fatal:true, ignoreBOM:true});
+function repairVideoName(name) {
+ // Legacy uploads read UTF-8 filename header bytes as Latin-1.
+ // Only reinterpret Latin-1 strings that contain a complete UTF-8 sequence.
+ if (!/^[\u0000-\u00ff]*[\u0080-\u00ff][\u0000-\u00ff]*$/.test(name)) return name;
+ try {
+  return filenameDecoder.decode(Buffer.from(name, 'latin1'));
+ } catch {
+  return name;
+ }
+}
 const uuid=(s)=>/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s||'');
 app.get('/api/library',auth,async(req,res)=>{
  const [folders,videos]=await Promise.all([db.from('folders').select('id,name,created_at').eq('user_id',req.uid).order('name'),db.from('videos').select('id,folder_id,name,mime,size,width,height,duration,status,created_at').eq('user_id',req.uid).order('created_at',{ascending:false})]);
- res.json({folders:check(folders),videos:check(videos)});
+ const videoItems = check(videos).map(video => ({...video, name:repairVideoName(video.name)}));
+ res.json({folders:check(folders),videos:videoItems});
 });
 app.post('/api/folders',auth,async(req,res)=>res.status(201).json(check(await db.from('folders').insert({user_id:req.uid,name:nameOf(req.body.name)}).select('id,name,created_at').single())));
 for(const table of ['videos','folders'])app.patch('/api/'+table+'/:id',auth,async(req,res)=>{
@@ -46,7 +58,18 @@ for(const table of ['videos','folders'])app.patch('/api/'+table+'/:id',auth,asyn
  if(!r)return res.sendStatus(404);res.json(r);
 });
 const upload=multer({dest:tmp,limits:{fileSize:Number(process.env.MAX_UPLOAD_MB||2048)*1024*1024,files:1,fields:5},fileFilter(req,file,cb){cb(null,['video/mp4','video/webm','video/quicktime','video/x-matroska'].includes(file.mimetype))}});
+function uploadGitHubMessage(error) {
+ const {upstreamStatus: status, stage} = error;
+ if (status === 401) return 'Token GitHub không hợp lệ hoặc đã hết hạn. Hãy cập nhật GITHUB_TOKEN trên Render.';
+ if (status === 404 && stage === 'repo') return 'GitHub không tìm thấy repo lưu video hoặc token chưa được cấp quyền vào repo. Kiểm tra GITHUB_OWNER, GITHUB_REPO và quyền Contents: Read and write.';
+ if (status === 404 && stage === 'branch') return 'Không tìm thấy nhánh lưu video trên GitHub. Kiểm tra GITHUB_BRANCH và tạo commit đầu tiên cho repo.';
+ if (status === 403 || status === 404) return 'GitHub từ chối truy cập. Kiểm tra token có quyền Contents: Read and write cho repo lưu video và nhánh có cho phép ghi trực tiếp.';
+ if (status === 409 || status === 422) return 'GitHub từ chối ghi video vào nhánh lưu trữ. Kiểm tra quy tắc bảo vệ nhánh hoặc thử lại.';
+ if (!status || status === 429 || status >= 500) return 'GitHub chưa phản hồi hoặc đang giới hạn yêu cầu. Hãy thử tải lên lại.';
+ return 'Không lưu được video lên GitHub. Kiểm tra Render Logs để biết mã lỗi.';
+}
 const active=new Set();
+const deletingFolders = new Set();
 app.post('/api/videos',auth,async(req,res,next)=>{
  if(active.has(req.uid)||active.size>=2)return res.status(429).json({error:'Đang xử lý video. Vui lòng thử lại sau.'});
  active.add(req.uid);
@@ -56,30 +79,120 @@ app.post('/api/videos',auth,async(req,res,next)=>{
   if(err)throw err;if(!req.file){const e=Error('Chọn video MP4, WebM, MOV hoặc MKV.');e.status=400;throw e}
   if(!req.file.size){const e=Error('Video rỗng.');e.status=400;throw e}
   const folder=req.body.folderId||null;
+  if (folder && deletingFolders.has(req.uid + '/' + String(folder).toLowerCase())) {
+   return res.status(409).json({error:'Thư mục đang được xóa.'});
+  }
   if(folder&&(!uuid(folder)||!check(await db.from('folders').select('id').eq('id',folder).eq('user_id',req.uid).maybeSingle()))){const e=Error('Thư mục không tồn tại.');e.status=400;throw e}
   if (!(await isPrivateVideoRepo())) {
    return res.status(409).json({error:'Repo lưu video trên GitHub phải ở chế độ Private.'});
   }
-  id=randomUUID();
+  await checkVideoBranch();
+  const videoId = randomUUID();
+  const directory = videoDirectory(req.uid, videoId);
+  const name = nameOf(req.body.fileName ?? repairVideoName(req.file.originalname));
   const dimension=k=>{const n=Number(req.body[k]);return Number.isFinite(n)&&n>0?n:null};
-  check(await db.from('videos').insert({id,user_id:req.uid,folder_id:folder,name:nameOf(req.file.originalname),mime:req.file.mimetype,size:req.file.size,width:dimension('width'),height:dimension('height'),duration:dimension('duration')}));
+  check(await db.from('videos').insert({id:videoId,user_id:req.uid,folder_id:folder,name,mime:req.file.mimetype,size:req.file.size,width:dimension('width'),height:dimension('height'),duration:dimension('duration')}));
+  id = videoId;
   file=await open(req.file.path,'r');const chunks=[];let position=0;const chunkSize=20*1024*1024;
   while(position<req.file.size){
    const buffer=Buffer.alloc(Math.min(chunkSize,req.file.size-position));let filled=0;
    while(filled<buffer.length){const {bytesRead}=await file.read(buffer,filled,buffer.length-filled,position+filled);if(!bytesRead)throw Error('Không đọc được video.');filled+=bytesRead}
-   const prefix=(process.env.GITHUB_FOLDER||'videos').replace(/^\/+|\/+$/g,'');
-   if(!/^[a-zA-Z0-9_/-]+$/.test(prefix)||prefix.includes('..'))throw Error('GITHUB_FOLDER không hợp lệ.');
-   chunks.push(await putChunk(prefix+'/'+req.uid+'/'+id+'/'+String(chunks.length).padStart(5,'0')+'.part',buffer));
+   chunks.push(await putChunk(directory+'/'+String(chunks.length).padStart(5,'0')+'.part',buffer));
    check(await db.from('videos').update({chunks}).eq('id',id).eq('user_id',req.uid));position+=filled;
   }
   check(await db.from('videos').update({status:'ready'}).eq('id',id).eq('user_id',req.uid));
   res.status(201).json({id});
  }catch(e){
-  if(id)await db.from('videos').update({status:'failed'}).eq('id',id).eq('user_id',req.uid);
+  if (id) {
+   try {
+    check(await db.from('videos').update({status:'failed'}).eq('id',id).eq('user_id',req.uid));
+   } catch (markError) {
+    console.error('Could not mark upload failed:', markError.message);
+   }
+  }
+  if (e instanceof GitHubRequestError) {
+   console.error('Video upload failed:', e.message);
+   return res.status(502).json({error:uploadGitHubMessage(e)});
+  }
   next(e);
- }finally{await file?.close();if(req.file)await unlink(req.file.path).catch(()=>{});active.delete(req.uid)}
+ } finally {
+  await file?.close().catch(() => {});
+  if (req.file) await unlink(req.file.path).catch(() => {});
+  active.delete(req.uid);
+ }
  });
 });
+const deletingVideos = new Set();
+
+async function removeStoredVideo(userId, id) {
+ const operation = userId + '/' + id.toLowerCase();
+ if (deletingVideos.has(operation)) return {status:409, error:'Video đang được xóa. Hãy thử lại.'};
+ deletingVideos.add(operation);
+ const owned = query => query.eq('id', id).eq('user_id', userId);
+ try {
+  const video = check(await owned(db.from('videos').select('id,status,chunks')).maybeSingle());
+  if (!video) return {status:404, error:'Không tìm thấy video.'};
+  if (video.status === 'uploading' && active.has(userId)) {
+   return {status:409, error:'Đợi video tải lên xong rồi thử xóa lại.'};
+  }
+  const marked = check(await owned(db.from('videos').update({status:'deleting',share_token:null}))
+   .eq('status', video.status).select('id').maybeSingle());
+  if (!marked) return {status:409, error:'Trạng thái video đã thay đổi. Hãy thử lại.'};
+  try {
+   await deleteVideoChunks(userId, video.id, video.chunks);
+  } catch (error) {
+   console.error('GitHub video deletion failed:', error.message);
+   return {status:502, error:'Chưa xóa hết video trên GitHub. Hãy thử xóa lại để tiếp tục.'};
+  }
+  check(await owned(db.from('videos').delete()).eq('status', 'deleting'));
+  return null;
+ } finally {
+  deletingVideos.delete(operation);
+ }
+}
+
+app.delete('/api/videos/:id', auth, async (req, res) => {
+ const {id} = req.params;
+ if (!uuid(id)) return res.sendStatus(404);
+ const failure = await removeStoredVideo(req.uid, id);
+ if (failure) return res.status(failure.status).json({error:failure.error});
+ res.json({id:id.toLowerCase()});
+});
+
+app.delete('/api/folders/:id', auth, async (req, res) => {
+ const {id} = req.params;
+ const missing = () => res.status(404).json({error:'Không tìm thấy thư mục.'});
+ if (!uuid(id)) return missing();
+
+ const operation = req.uid + '/' + id.toLowerCase();
+ if (deletingFolders.has(operation)) return res.status(409).json({error:'Thư mục đang được xóa.'});
+ if (active.has(req.uid)) return res.status(409).json({error:'Đợi tải video lên xong rồi thử xóa thư mục lại.'});
+ deletingFolders.add(operation);
+
+ const owned = query => query.eq('id', id).eq('user_id', req.uid);
+ try {
+  if (!check(await owned(db.from('folders').select('id')).maybeSingle())) return missing();
+  for (;;) {
+   const videos = check(await db.from('videos').select('id')
+    .eq('folder_id', id).eq('user_id', req.uid).order('id').limit(50));
+   if (!videos.length) break;
+   for (const video of videos) {
+    const failure = await removeStoredVideo(req.uid, video.id);
+    if (failure && failure.status !== 404) return res.status(failure.status).json({error:failure.error});
+   }
+  }
+
+  const result = await owned(db.from('folders').delete()).select('id').maybeSingle();
+  if (result.error?.code === '23503') {
+   return res.status(409).json({error:'Thư mục vẫn còn video. Hãy thử xóa lại.'});
+  }
+  if (!check(result)) return missing();
+  res.json({ok:true});
+ } finally {
+  deletingFolders.delete(operation);
+ }
+});
+
 app.get('/api/videos/:id/link',auth,async(req,res)=>{
  const v=check(await db.from('videos').select('id').eq('id',req.params.id).eq('user_id',req.uid).eq('status','ready').maybeSingle());
  if(!v)return res.sendStatus(404);
@@ -136,7 +249,7 @@ app.get('/api/shared/:token', async (req, res) => {
  res.set('Cache-Control', 'private, no-store');
  const video = await sharedVideo(req.params.token, 'name');
  if (!video) return res.sendStatus(404);
- res.json({name: video.name});
+ res.json({name: repairVideoName(video.name)});
 });
 
 app.get('/api/shared/:token/media', async (req, res) => {
@@ -160,8 +273,11 @@ app.get('/api/shared-folders/:token', async (req, res) => {
  res.set('Cache-Control', 'private, no-store');
  const folder = await sharedFolder(req.params.token);
  if (!folder) return res.sendStatus(404);
- const videos = check(await folderVideos(folder, 'id,name').order('created_at', {ascending:false}));
- res.json({name: folder.name, videos: videos.map(({id, name}) => ({id, name}))});
+ const fields = 'id,name,size,width,height,duration,created_at';
+ const videos = check(await folderVideos(folder, fields).order('created_at', {ascending:false}));
+ res.json({name:folder.name, videos:videos.map(({id, name, size, width, height, duration, created_at}) => ({
+  id, name:repairVideoName(name), size, width, height, duration, created_at
+ }))});
 });
 
 app.get('/api/shared-folders/:token/videos/:id/media', async (req, res) => {
@@ -187,7 +303,7 @@ async function streamVideo(req, res, v, download = false) {
  const {start,end,partial}=range;
  res.status(partial?206:200).set({'Content-Type':v.mime,'Content-Length':String(end-start+1),'Accept-Ranges':'bytes','Cache-Control':'private, no-store','Referrer-Policy':'no-referrer'});
  if(partial)res.set('Content-Range',`bytes ${start}-${end}/${v.size}`);
- if(download)res.set('Content-Disposition',"attachment; filename=\"video\"; filename*=UTF-8''"+encodeURIComponent(v.name).replace(/['()*]/g,c=>'%'+c.charCodeAt(0).toString(16)));
+ if(download)res.set('Content-Disposition',"attachment; filename=\"video\"; filename*=UTF-8''"+encodeURIComponent(repairVideoName(v.name)).replace(/['()*]/g,c=>'%'+c.charCodeAt(0).toString(16)));
  if (req.method === 'HEAD') return res.end();
  const controller=new AbortController();res.on('close',()=>controller.abort());
  let offset=0;

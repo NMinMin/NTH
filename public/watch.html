@@ -5,21 +5,39 @@
  <meta name="viewport" content="width=device-width, initial-scale=1">
  <meta name="robots" content="noindex, nofollow">
  <meta name="referrer" content="no-referrer">
- <title>Video được chia sẻ | NTH Video</title>
+ <title>Được chia sẻ | NTH Video</title>
  <link rel="stylesheet" href="/style.css">
+ <link rel="stylesheet" href="/file-browser.css">
  <script defer src="/video-quality.js"></script>
+ <script defer src="/file-browser.js"></script>
  <script defer src="/watch.js"></script>
 </head>
-<body class="watch-page">
- <main class="watch-shell">
-  <a class="brand" href="/">◈ NTH<span>VIDEO</span></a>
-  <h1 id="watchTitle">Video được chia sẻ</h1>
-  <nav id="sharedFolderFiles" aria-label="Video trong thư mục" hidden></nav>
-  <h2 id="sharedVideoTitle" hidden></h2>
-  <video id="sharedPlayer" controls playsinline preload="metadata" hidden></video>
-  <p id="watchStatus" role="status">Đang mở video…</p>
-  <a id="sharedDownload" class="primary" download hidden>Tải bản gốc</a>
+<body class="shared-workspace">
+ <header class="shared-header">
+  <a class="brand" href="/">▣ NTH<span>VIDEO</span></a>
+  <span>Được chia sẻ với bạn</span>
+ </header>
+ <main class="file-surface shared-surface">
+  <div class="page-heading"><h1 id="watchTitle">Được chia sẻ với bạn</h1></div>
+  <p id="watchStatus" role="status">Đang mở link chia sẻ…</p>
+  <section id="sharedFolder" class="file-section" aria-label="Video trong thư mục" hidden>
+   <div class="browser-bar">
+    <p id="sharedCount"></p>
+    <div id="sharedLayout" class="layout-options" role="group" aria-label="Kiểu hiển thị">
+     <button type="button" data-layout="grid" aria-label="Dạng lưới" aria-pressed="true" title="Dạng lưới"><span class="grid-icon" aria-hidden="true"></span></button>
+     <button type="button" data-layout="list" aria-label="Dạng danh sách" aria-pressed="false" title="Dạng danh sách"><span class="list-icon" aria-hidden="true"></span></button>
+    </div>
+   </div>
+   <div id="sharedFolderFiles" class="file-grid"></div>
+   <p id="sharedEmpty" class="browser-empty" hidden>Thư mục này chưa có video.</p>
+  </section>
+  <section id="sharedPlayback" hidden>
+   <video id="sharedPlayer" controls playsinline preload="metadata"></video>
+   <div class="player-toolbar"><p id="sharedPlayerStatus" role="status"></p><a id="sharedDownload" class="primary" download>Tải bản gốc</a></div>
+  </section>
  </main>
+ <dialog id="sharedPreview" aria-labelledby="sharedVideoTitle">
+  <div class="dialog-heading"><h2 id="sharedVideoTitle"></h2><button id="closeSharedPreview" aria-label="Đóng trình phát">×</button></div>
+ </dialog>
 </body>
 </html>
-
