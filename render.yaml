@@ -1,0 +1,27 @@
+services:
+  - type: web
+    name: nth-video-api
+    runtime: node
+    plan: starter
+    buildCommand: npm ci
+    startCommand: npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_VERSION
+        value: 22
+      - key: SUPABASE_URL
+        value: https://kqmvhtuhneklsgwfaeds.supabase.co
+      - key: SUPABASE_PUBLISHABLE_KEY
+        value: sb_publishable_pfY2j_oI_crA3IUzTjGGZA_koB9SnZP
+      - key: MEDIA_SIGNING_SECRET
+        generateValue: true
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: GITHUB_TOKEN
+        sync: false
+      - key: GITHUB_OWNER
+        sync: false
+      - key: GITHUB_REPO
+        sync: false
+      - key: APP_ORIGIN
+        sync: false

@@ -1,0 +1,55 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {spawn} from 'node:child_process';
+import {setTimeout as delay} from 'node:timers/promises';
+import {sign} from '../server/media.js';
+const uid='11111111-1111-4111-8111-111111111111',id='22222222-2222-4222-8222-222222222222';
+test('API permissions and cross-part streaming',async t=>{
+ const port=31000+Math.floor(Math.random()*15000),base='http://127.0.0.1:'+port;
+ const child=spawn(process.execPath,['--import','./tests/mock-services.js','server/index.js'],{env:{...process.env,PORT:String(port),SUPABASE_URL:'https://example.supabase.co',SUPABASE_PUBLISHABLE_KEY:'test',SUPABASE_SERVICE_ROLE_KEY:'test',GITHUB_TOKEN:'test',GITHUB_OWNER:'owner',GITHUB_REPO:'repo',MEDIA_SIGNING_SECRET:'test-secret',APP_ORIGIN:base},stdio:['ignore','pipe','pipe']});
+ let logs='';child.stdout.on('data',d=>logs+=d);child.stderr.on('data',d=>logs+=d);
+ t.after(()=>child.kill());
+ let started=false;for(let i=0;i<100;i++){try{const r=await fetch(base+'/api/health');if(r.ok){started=true;break}}catch{}await delay(100)}assert.ok(started,logs);
+ const headers={Authorization:'Bearer valid-token'};
+ assert.equal((await fetch(base+'/api/library')).status,401);
+ assert.equal((await fetch(base+'/api/library',{headers:{Authorization:'Bearer invalid-token'}})).status,401);
+ assert.equal((await fetch(base+'/api/videos',{method:'POST'})).status,401);
+ const library=await (await fetch(base+'/api/library',{headers})).json();assert.equal(library.videos[0].id,id);
+ const response=await fetch(base+'/api/videos/'+id+'/link',{headers});assert.equal(response.status,200);
+ const {url}=await response.json();
+ const full=await fetch(base+url);assert.equal(full.status,200);assert.equal(await full.text(),'abcdefghij');
+ const range=await fetch(base+url,{headers:{Range:'bytes=3-7'}});assert.equal(range.status,206);assert.equal(range.headers.get('content-range'),'bytes 3-7/10');assert.equal(await range.text(),'defgh');
+ const suffix=await fetch(base+url,{headers:{Range:'bytes=-2'}});assert.equal(await suffix.text(),'ij');
+ assert.equal((await fetch(base+url,{headers:{Range:'bytes=10-'}})).status,416);
+ const download=await fetch(base+url+'&download=1');assert.match(download.headers.get('content-disposition'),/attachment/);assert.equal(await download.text(),'abcdefghij');
+ assert.equal((await fetch(base+url.replace(uid,'33333333-3333-4333-8333-333333333333'))).status,403);
+ const exp=Math.floor(Date.now()/1000)+30,other='33333333-3333-4333-8333-333333333333';
+ const wrongOwner='/api/media/'+id+'?uid='+other+'&exp='+exp+'&sig='+sign(id,other,exp,'test-secret');
+ assert.equal((await fetch(base+wrongOwner)).status,404);
+
+ // Exercise the real multipart -> disk -> GitHub write -> metadata -> download path.
+ const folderResponse=await fetch(base+'/api/folders',{method:'POST',headers:{...headers,'Content-Type':'application/json'},body:JSON.stringify({name:'Cá nhân'})});
+ assert.equal(folderResponse.status,201);const folder=await folderResponse.json();
+ const rename=await fetch(base+'/api/folders/'+folder.id,{method:'PATCH',headers:{...headers,'Content-Type':'application/json'},body:JSON.stringify({name:'Đã đổi tên'})});assert.equal(rename.status,200);
+ const invalidFolder=new FormData();invalidFolder.append('video',new Blob(['abc'],{type:'video/mp4'}),'test.mp4');invalidFolder.append('folderId','55555555-5555-4555-8555-555555555555');
+ assert.equal((await fetch(base+'/api/videos',{method:'POST',headers,body:invalidFolder})).status,400);
+ const unsupported=new FormData();unsupported.append('video',new Blob(['abc'],{type:'text/plain'}),'test.txt');
+ assert.equal((await fetch(base+'/api/videos',{method:'POST',headers,body:unsupported})).status,400);
+ const publicRepoUpload = new FormData();
+ publicRepoUpload.append('video', new Blob(['abc'], {type:'video/mp4'}), 'private.mp4');
+ const blocked = await fetch(base+'/api/videos', {method:'POST',headers,body:publicRepoUpload});
+ assert.equal(blocked.status,409);
+ assert.match((await blocked.json()).error,/Private/);
+ const input=Buffer.alloc(20*1024*1024+17,65);input.write('CROSS-PART-END',20*1024*1024-3);
+ const form=new FormData();form.append('video',new Blob([input],{type:'video/mp4'}),'upload.mp4');form.append('folderId',folder.id);
+ const uploaded=await fetch(base+'/api/videos',{method:'POST',headers,body:form});assert.equal(uploaded.status,201,await uploaded.clone().text());
+ const uploadedId=(await uploaded.json()).id;
+ const uploadedLink=await(await fetch(base+'/api/videos/'+uploadedId+'/link',{headers})).json();
+ const replay=await fetch(base+uploadedLink.url);assert.deepEqual(Buffer.from(await replay.arrayBuffer()),input);
+ const uploadedRange=await fetch(base+uploadedLink.url,{headers:{Range:'bytes='+String(20*1024*1024-3)+'-'+String(20*1024*1024+10)}});
+ assert.equal(await uploadedRange.text(),'CROSS-PART-END');
+ const renameVideo=await fetch(base+'/api/videos/'+uploadedId,{method:'PATCH',headers:{...headers,'Content-Type':'application/json'},body:JSON.stringify({name:'New name.mp4'})});assert.equal(renameVideo.status,200);
+
+ const vendor=await fetch(base+'/vendor/supabase.js');assert.equal(vendor.status,200);
+ assert.match(await (await fetch(base+'/')).text(),/NTH Video/);
+});
