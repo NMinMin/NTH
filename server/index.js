@@ -6,7 +6,7 @@ import {rateLimit} from 'express-rate-limit';
 import multer from 'multer';
 import {createClient} from '@supabase/supabase-js';
 import {mkdir,open,unlink} from 'node:fs/promises';
-import {randomUUID} from 'node:crypto';
+import {randomBytes,randomUUID} from 'node:crypto';
 import {once} from 'node:events';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
@@ -86,16 +86,77 @@ app.get('/api/videos/:id/link',auth,async(req,res)=>{
  const exp=Math.floor(Date.now()/1000)+21600;
  res.json({url:'/api/media/'+v.id+'?uid='+req.uid+'&exp='+exp+'&sig='+sign(v.id,req.uid,exp,secret)});
 });
+const sharePath = token => token ? '/watch#' + token : null;
+
+app.use('/api/videos/:id/share', auth, (req, res, next) => {
+ res.set('Cache-Control', 'private, no-store');
+ if (!uuid(req.params.id)) return res.sendStatus(404);
+ next();
+});
+
+function ownedShareQuery(query, req) {
+ return query.eq('id', req.params.id).eq('user_id', req.uid).eq('status', 'ready');
+}
+
+app.get('/api/videos/:id/share', async (req, res) => {
+ const video = check(await ownedShareQuery(db.from('videos').select('share_token'), req).maybeSingle());
+ if (!video) return res.sendStatus(404);
+ res.json({path: sharePath(video.share_token)});
+});
+
+app.post('/api/videos/:id/share', async (req, res) => {
+ const token = randomBytes(32).toString('base64url');
+ const created = check(await ownedShareQuery(db.from('videos').update({share_token: token}), req)
+  .is('share_token', null).select('share_token').maybeSingle());
+ if (created) return res.status(201).json({path: sharePath(created.share_token)});
+ const video = check(await ownedShareQuery(db.from('videos').select('share_token'), req).maybeSingle());
+ if (!video) return res.sendStatus(404);
+ if (!video.share_token) return res.status(409).json({error:'Link vừa bị thu hồi. Hãy thử tạo lại.'});
+ res.json({path: sharePath(video.share_token)});
+});
+
+app.delete('/api/videos/:id/share', async (req, res) => {
+ const video = check(await ownedShareQuery(db.from('videos').update({share_token: null}), req)
+  .select('id').maybeSingle());
+ if (!video) return res.sendStatus(404);
+ res.json({path: null});
+});
+
+async function sharedVideo(token, columns) {
+ if (!/^[A-Za-z0-9_-]{43}$/.test(token)) return null;
+ return check(await db.from('videos').select(columns).eq('share_token', token)
+  .eq('status', 'ready').maybeSingle());
+}
+
+app.get('/api/shared/:token', async (req, res) => {
+ res.set('Cache-Control', 'private, no-store');
+ const video = await sharedVideo(req.params.token, 'name');
+ if (!video) return res.sendStatus(404);
+ res.json({name: video.name});
+});
+
+app.get('/api/shared/:token/media', async (req, res) => {
+ res.set('Cache-Control', 'private, no-store');
+ const video = await sharedVideo(req.params.token, 'name,mime,size,chunks');
+ if (!video) return res.sendStatus(404);
+ await streamVideo(req, res, video, req.query.download === '1');
+});
+
 app.get('/api/media/:id',async(req,res)=>{
  const {uid,exp,sig}=req.query;
  if(!uuid(req.params.id)||!uuid(uid)||!verify(req.params.id,uid,exp,sig,secret))return res.sendStatus(403);
  const v=check(await db.from('videos').select('*').eq('id',req.params.id).eq('user_id',uid).eq('status','ready').maybeSingle());
  if(!v)return res.sendStatus(404);
+ await streamVideo(req, res, v, req.query.download === '1');
+});
+
+async function streamVideo(req, res, v, download = false) {
  let range;try{range=rangeOf(req.headers.range,Number(v.size))}catch{return res.status(416).set('Content-Range','bytes */'+v.size).end()}
  const {start,end,partial}=range;
  res.status(partial?206:200).set({'Content-Type':v.mime,'Content-Length':String(end-start+1),'Accept-Ranges':'bytes','Cache-Control':'private, no-store','Referrer-Policy':'no-referrer'});
  if(partial)res.set('Content-Range',`bytes ${start}-${end}/${v.size}`);
- if(req.query.download==='1')res.set('Content-Disposition',"attachment; filename=\"video\"; filename*=UTF-8''"+encodeURIComponent(v.name).replace(/['()*]/g,c=>'%'+c.charCodeAt(0).toString(16)));
+ if(download)res.set('Content-Disposition',"attachment; filename=\"video\"; filename*=UTF-8''"+encodeURIComponent(v.name).replace(/['()*]/g,c=>'%'+c.charCodeAt(0).toString(16)));
+ if (req.method === 'HEAD') return res.end();
  const controller=new AbortController();res.on('close',()=>controller.abort());
  let offset=0;
  try{
@@ -107,6 +168,10 @@ app.get('/api/media/:id',async(req,res)=>{
    if(offset>end)break;
   }res.end();
  }catch(e){if(!res.destroyed)res.destroy(e)}
+}
+app.get('/watch', (req, res) => {
+ res.set('Cache-Control', 'private, no-store');
+ res.sendFile(path.join(root, 'public', 'watch.html'));
 });
 app.use('/vendor',express.static(path.join(root,'node_modules/@supabase/supabase-js/dist/umd')));
 app.use(express.static(path.join(root,'public')));

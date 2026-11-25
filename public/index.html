@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="vi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>NTH Video — Không gian video của bạn</title><link rel="stylesheet" href="/style.css"><script defer src="/vendor/supabase.js"></script><script defer src="/app.js"></script></head>
+<html lang="vi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>NTH Video — Không gian video của bạn</title><link rel="stylesheet" href="/style.css"><script defer src="/vendor/supabase.js"></script><script defer src="/video-quality.js"></script><script defer src="/app.js"></script></head>
 <body>
 <section id="authView" class="auth-shell">
  <div class="intro"><a class="brand" href="/">◈ NTH<span>VIDEO</span></a><div><span class="eyebrow">YOUR MOMENTS, ORIGINAL QUALITY</span><h1>Mọi khoảnh khắc.<br>Trọn từng chi tiết.</h1><p>Một không gian riêng cho video của bạn.<br>Lưu trữ, sắp xếp và xem lại với chất lượng gốc.</p><div class="quality">4K <span>PHÁT VIDEO GỐC</span></div></div><small>Video của bạn. Không gian của bạn.</small></div>
@@ -17,4 +17,13 @@
 </div>
 <dialog id="playerDialog" aria-labelledby="playerTitle"><div class="dialog-heading"><h2 id="playerTitle"></h2><button id="closePlayer" aria-label="Đóng trình phát">✕</button></div><video id="player" controls playsinline preload="metadata"></video><div class="player-toolbar"><p id="playerNote" role="status"></p><div class="player-actions"><button id="playerFullscreen" type="button" hidden>Toàn màn hình</button><button id="playerDownload" class="primary">Tải bản gốc</button></div></div></dialog>
 <dialog id="nameDialog"><form id="nameForm"><h2 id="nameTitle">Tạo thư mục</h2><label>Tên<input id="nameInput" required maxlength="180"></label><div class="dialog-actions"><button type="button" id="cancelName">Hủy</button><button class="primary">Lưu</button></div></form></dialog><div id="toast" role="status" hidden></div>
+<dialog id="shareDialog" aria-labelledby="shareTitle">
+ <div class="dialog-heading"><h2 id="shareTitle">Chia sẻ video</h2><button id="closeShare" aria-label="Đóng hộp thoại chia sẻ">✕</button></div>
+ <p id="shareStatus" role="status"></p>
+ <button id="createShare" class="primary">Tạo link chia sẻ</button>
+ <div id="activeShare" hidden>
+  <label>Link xem video<input id="shareLink" type="url" readonly></label>
+  <div class="dialog-actions"><button id="revokeShare">Thu hồi link</button><button id="copyShare" class="primary">Sao chép link</button></div>
+ </div>
+</dialog>
 </body></html>

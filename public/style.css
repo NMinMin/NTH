@@ -9,3 +9,16 @@
 .player-toolbar{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-top:12px}
 #playerNote{margin:0}
 .player-actions{display:flex;gap:8px;flex-wrap:wrap}
+
+#shareDialog{max-width:520px}
+#shareStatus{font-size:.875rem}
+.card-actions{flex-wrap:wrap}
+.watch-page{background:#142525;color:#f1f8f4;min-height:100vh}
+.watch-shell{max-width:1280px;padding:clamp(20px,4vw,48px)}
+.watch-shell .brand{color:#f1f8f4;margin-bottom:32px}
+.watch-shell h1{overflow-wrap:anywhere}
+.watch-shell p{color:#c4d4ce;margin-top:12px}
+#sharedPlayer{display:block;max-height:75vh}
+#sharedPlayer:fullscreen{width:100%;height:100%;max-height:none;object-fit:contain}
+
+#sharedDownload{display:inline-block;border-radius:8px;padding:10px 14px;text-decoration:none}

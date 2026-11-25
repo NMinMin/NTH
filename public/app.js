@@ -11,12 +11,6 @@ async function api(url,options={}){
 }
 const bytes=n=>n>=1073741824?(n/1073741824).toFixed(2)+' GB':(n/1048576).toFixed(1)+' MB';
 function element(tag,cls,text){const e=document.createElement(tag);if(cls)e.className=cls;if(text!==undefined)e.textContent=text;return e}
-function videoQuality(width, height) {
- const longEdge = Math.max(width || 0, height || 0);
- const shortEdge = Math.min(width || 0, height || 0);
- if ((longEdge === 3840 || longEdge === 4096) && shortEdge >= 1600 && shortEdge <= 2160) return '4K';
- return height ? height + 'p' : 'BẢN GỐC';
-}
 function selectFolder(id){folder=id;render()}
 function render(){
  $('pageTitle').textContent=library.folders.find(f=>f.id===folder)?.name||'Tất cả video';
@@ -41,7 +35,10 @@ function render(){
   const actions=element('div','card-actions'),rename=element('button','','Đổi tên'),download=element('button','','↓ Tải bản gốc');
   rename.onclick=()=>askName('Đổi tên video',v.name,async name=>{await api('/videos/'+v.id,{method:'PATCH',body:JSON.stringify({name})});await load()});
   download.disabled=v.status!=='ready';download.onclick=()=>downloadVideo(v).catch(fail);
-  actions.append(rename,download);info.append(actions);card.append(thumb,info);$('videoGrid').append(card);
+  const share = element('button', '', 'Chia sẻ');
+  share.disabled = v.status !== 'ready';
+  share.onclick = () => openSharing(v).catch(fail);
+  actions.append(rename, share, download);info.append(actions);card.append(thumb,info);$('videoGrid').append(card);
  }
 }
 async function load(){library=await api('/library');render()}
@@ -53,6 +50,61 @@ $('renameFolder').onclick=()=>askName('Đổi tên thư mục',library.folders.f
 $('allVideos').onclick=()=>selectFolder(null);
 for(const id of ['search','fromDate','toDate','sort'])$(id).addEventListener('input',render);
 $('clearFilters').onclick=()=>{$('search').value='';$('fromDate').value='';$('toDate').value='';$('sort').value='new';render()};
+const shareDialog = $('shareDialog');
+const shareLink = $('shareLink');
+
+function showShareLink(path) {
+ shareLink.value = path ? new URL(path, location.origin).href : '';
+ $('activeShare').hidden = !path;
+ $('createShare').hidden = !!path;
+ $('shareStatus').textContent = path
+  ? 'Ai có link đều có thể xem video.'
+  : 'Tạo link để người khác xem video.';
+}
+
+async function openSharing(video) {
+ const endpoint = '/videos/' + video.id + '/share';
+ const {path} = await api(endpoint);
+ $('shareTitle').textContent = 'Chia sẻ ' + video.name;
+ showShareLink(path);
+ $('createShare').onclick = async () => {
+  const button = $('createShare');
+  button.disabled = true;
+  try {
+   const result = await api(endpoint, {method:'POST'});
+   showShareLink(result.path);
+  } catch (error) {
+   $('shareStatus').textContent = error.message;
+  } finally {
+   button.disabled = false;
+  }
+ };
+ $('revokeShare').onclick = async () => {
+  const button = $('revokeShare');
+  button.disabled = true;
+  try {
+   await api(endpoint, {method:'DELETE'});
+   showShareLink(null);
+   $('shareStatus').textContent = 'Đã thu hồi link chia sẻ.';
+  } catch (error) {
+   $('shareStatus').textContent = error.message;
+  } finally {
+   button.disabled = false;
+  }
+ };
+ shareDialog.showModal();
+}
+$('closeShare').onclick = () => shareDialog.close();
+$('copyShare').onclick = async () => {
+ try {
+  await navigator.clipboard.writeText(shareLink.value);
+  $('shareStatus').textContent = 'Đã sao chép link.';
+ } catch {
+  shareLink.select();
+  $('shareStatus').textContent = 'Sao chép link đang được chọn.';
+ }
+};
+
 const player = $('player');
 const playerDialog = $('playerDialog');
 const fullscreen = $('playerFullscreen');

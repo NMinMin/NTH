@@ -5,6 +5,7 @@ Web quản lý video tiếng Việt, frontend HTML/CSS/JS và API Node.js/Expres
 - Đăng ký email/mật khẩu, xác nhận email, đăng nhập, đăng xuất và làm mới phiên qua Supabase.
 - Thư viện riêng theo tài khoản; API xác thực JWT bằng Supabase getUser, database bật RLS.
 - Kéo thả/chọn nhiều video, tiến trình tải, tạo và đổi tên thư mục, đổi tên hiển thị video.
+- Chia sẻ từng video qua link xem và tải bản gốc, kể cả 4K. Chủ video có thể thu hồi link.
 - Tìm tên, lọc khoảng ngày upload theo múi giờ thiết bị, sắp xếp tên/mới/cũ.
 - Xem chất lượng gốc, tua bằng HTTP Range; tải xuống đúng byte gốc, không nén lại.
 - Video lớn chia thành phần 20 MiB, proxy ghép luồng từ GitHub. Giới hạn upload mặc định 2048 MiB/file.
@@ -12,6 +13,7 @@ Web quản lý video tiếng Việt, frontend HTML/CSS/JS và API Node.js/Expres
 
 ## 1. Chuẩn bị Supabase
 1. Mở SQL Editor trong project kqmvhtuhneklsgwfaeds, chạy toàn bộ supabase/schema.sql một lần.
+   Nếu đã chạy schema cũ, chạy riêng supabase/add-video-sharing.sql để bật chia sẻ.
 2. Authentication > Providers: bật Email. Nên giữ Confirm email bật.
 3. Authentication > URL Configuration: đặt Site URL thành URL Render sau deploy và thêm URL đó trong Redirect URLs; local dùng http://localhost:3000.
 4. Settings > API keys: lấy backend secret key (sb_secret_...) hoặc legacy service_role key. Điền vào SUPABASE_SERVICE_ROLE_KEY, tuyệt đối không đưa vào frontend/Git.
@@ -60,8 +62,12 @@ Blueprint chọn plan starter; có thể đổi plan. Render cần dung lượng
 | POST | /api/videos | multipart: video; folderId, width, height, duration tùy chọn |
 | GET | /api/videos/:id/link | Cấp URL phát/tải có chữ ký, hiệu lực 6 giờ |
 | GET | /api/media/:id?... | Luồng video; hỗ trợ Range, &download=1 |
+| GET / POST / DELETE | /api/videos/:id/share | Chủ video xem, tạo hoặc thu hồi link chia sẻ |
+| GET | /watch#TOKEN | Trang xem video được chia sẻ |
+| GET | /api/shared/:token | Tên video được chia sẻ |
+| GET | /api/shared/:token/media | Luồng video được chia sẻ, hỗ trợ Range và tải bản gốc bằng ?download=1 |
 
-Trừ health/config và đường dẫn media đã ký, API yêu cầu Supabase access token. Đường dẫn media là bearer link: ai có link có thể dùng trong 6 giờ, kể cả sau khi chủ tài khoản đăng xuất. Link được kiểm tra user sở hữu video, chỉ đọc bản ready. Giữ link riêng tư; mở lại video để cấp link mới nếu hết hạn.
+API thư viện và quản lý chia sẻ yêu cầu Supabase access token. Người nhận có thể xem và tải bản gốc mà không đăng nhập. Sau khi chủ video thu hồi link, các yêu cầu mới qua link bị từ chối. Đường dẫn media là bearer link: ai có link có thể dùng trong 6 giờ, kể cả sau khi chủ tài khoản đăng xuất. Link được kiểm tra user sở hữu video, chỉ đọc bản ready. Giữ link riêng tư; mở lại video để cấp link mới nếu hết hạn.
 
 Ví dụ upload từ API khác:
 ~~~javascript

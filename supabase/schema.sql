@@ -13,9 +13,11 @@ create table public.videos (
  width integer, height integer, duration double precision,
  status text not null default 'uploading' check(status in ('uploading','ready','failed')),
  chunks jsonb not null default '[]',
+ share_token text,
  created_at timestamptz not null default now(),
  foreign key(folder_id,user_id) references public.folders(id,user_id)
 );
+create unique index videos_share_token_unique on public.videos(share_token) where share_token is not null;
 create index videos_owner_date on public.videos(user_id,created_at desc);
 alter table public.folders enable row level security;
 alter table public.videos enable row level security;

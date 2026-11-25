@@ -50,6 +50,42 @@ test('API permissions and cross-part streaming',async t=>{
  assert.equal(await uploadedRange.text(),'CROSS-PART-END');
  const renameVideo=await fetch(base+'/api/videos/'+uploadedId,{method:'PATCH',headers:{...headers,'Content-Type':'application/json'},body:JSON.stringify({name:'New name.mp4'})});assert.equal(renameVideo.status,200);
 
+
+ const shareEndpoint = base + '/api/videos/' + id + '/share';
+ const otherHeaders = {Authorization:'Bearer other-token'};
+ assert.equal((await fetch(shareEndpoint,{method:'POST'})).status,401);
+ for (const method of ['GET','POST','DELETE']) {
+  assert.equal((await fetch(shareEndpoint,{method,headers:otherHeaders})).status,404);
+ }
+ assert.deepEqual(await(await fetch(shareEndpoint,{headers})).json(),{path:null});
+ const createdShare = await fetch(shareEndpoint,{method:'POST',headers});
+ assert.equal(createdShare.status,201);
+ const share = await createdShare.json();
+ assert.match(share.path,/^\/watch#[A-Za-z0-9_-]{43}$/);
+ assert.deepEqual(await(await fetch(shareEndpoint,{method:'POST',headers})).json(),share);
+ const watch = await fetch(base+share.path);
+ const watchHtml = await watch.text();
+ assert.match(watchHtml,/id="sharedPlayer"/);
+ assert.match(watchHtml,/id="sharedDownload"/);
+ const sharedEndpoint = base + '/api/shared/' + share.path.split('#')[1];
+ const sharedInfo = await fetch(sharedEndpoint);
+ assert.match(sharedInfo.headers.get('cache-control'),/no-store/);
+ assert.deepEqual(await sharedInfo.json(),{name:'test.mp4'});
+ const sharedRange = await fetch(sharedEndpoint+'/media',{headers:{Range:'bytes=3-7'}});
+ assert.equal(sharedRange.status,206);
+ assert.equal(await sharedRange.text(),'defgh');
+ assert.equal(sharedRange.headers.get('content-disposition'),null);
+ const downloadUrl = sharedEndpoint + '/media?download=1';
+ const sharedDownload = await fetch(downloadUrl);
+ assert.equal(sharedDownload.status,200);
+ assert.match(sharedDownload.headers.get('content-disposition'),/^attachment;.*test\.mp4$/);
+ assert.equal(await sharedDownload.text(),'abcdefghij');
+ assert.equal((await fetch(shareEndpoint,{method:'DELETE',headers})).status,200);
+ assert.equal((await fetch(sharedEndpoint)).status,404);
+ assert.equal((await fetch(sharedEndpoint+'/media')).status,404);
+ assert.equal((await fetch(downloadUrl)).status,404);
+ const recreated = await(await fetch(shareEndpoint,{method:'POST',headers})).json();
+ assert.notEqual(recreated.path,share.path);
  const vendor=await fetch(base+'/vendor/supabase.js');assert.equal(vendor.status,200);
  assert.match(await (await fetch(base+'/')).text(),/NTH Video/);
 });
