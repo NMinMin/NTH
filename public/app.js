@@ -11,6 +11,12 @@ async function api(url,options={}){
 }
 const bytes=n=>n>=1073741824?(n/1073741824).toFixed(2)+' GB':(n/1048576).toFixed(1)+' MB';
 function element(tag,cls,text){const e=document.createElement(tag);if(cls)e.className=cls;if(text!==undefined)e.textContent=text;return e}
+function videoQuality(width, height) {
+ const longEdge = Math.max(width || 0, height || 0);
+ const shortEdge = Math.min(width || 0, height || 0);
+ if ((longEdge === 3840 || longEdge === 4096) && shortEdge >= 1600 && shortEdge <= 2160) return '4K';
+ return height ? height + 'p' : 'BẢN GỐC';
+}
 function selectFolder(id){folder=id;render()}
 function render(){
  $('pageTitle').textContent=library.folders.find(f=>f.id===folder)?.name||'Tất cả video';
@@ -27,7 +33,7 @@ function render(){
  $('shownCount').textContent=list.length;$('videoGrid').replaceChildren();$('emptyState').hidden=!!list.length;
  for(const v of list){
   const card=element('article','video-card'),thumb=element('button','thumbnail');thumb.setAttribute('aria-label','Xem '+v.name);
-  thumb.append(element('span','play','▷'),element('span','resolution',v.height? v.height+'p':'BẢN GỐC'),element('span','duration',v.duration?Math.floor(v.duration/60)+':'+String(Math.floor(v.duration%60)).padStart(2,'0'):'VIDEO'));
+  thumb.append(element('span','play','▷'),element('span','resolution',videoQuality(v.width,v.height)),element('span','duration',v.duration?Math.floor(v.duration/60)+':'+String(Math.floor(v.duration%60)).padStart(2,'0'):'VIDEO'));
   thumb.disabled=v.status!=='ready';thumb.onclick=()=>play(v).catch(fail);
   const info=element('div','video-info'),title=element('h3','',v.name);title.title=v.name;
   const state=v.status==='failed'?' · Tải thất bại':v.status==='uploading'?' · Đang lưu':'';
@@ -47,10 +53,46 @@ $('renameFolder').onclick=()=>askName('Đổi tên thư mục',library.folders.f
 $('allVideos').onclick=()=>selectFolder(null);
 for(const id of ['search','fromDate','toDate','sort'])$(id).addEventListener('input',render);
 $('clearFilters').onclick=()=>{$('search').value='';$('fromDate').value='';$('toDate').value='';$('sort').value='new';render()};
-async function play(v){const {url}=await api('/videos/'+v.id+'/link');currentVideo=v;$('playerTitle').textContent=v.name;$('player').src=url;$('playerDialog').showModal();$('player').play().catch(()=>{})}
-$('closePlayer').onclick=()=>$('playerDialog').close();
-$('playerDialog').addEventListener('close',()=>{$('player').pause();$('player').removeAttribute('src');$('player').load()});
-$('player').addEventListener('error',()=>toast('Trình duyệt không phát được codec này. Bạn có thể tải bản gốc để xem bằng VLC.'));
+const player = $('player');
+const playerDialog = $('playerDialog');
+const fullscreen = $('playerFullscreen');
+async function play(video) {
+ const {url} = await api('/videos/'+video.id+'/link');
+ currentVideo = video;
+ $('playerTitle').textContent = video.name;
+ $('playerNote').textContent = 'Đang tải video gốc…';
+ fullscreen.hidden = true;
+ player.src = url;
+ if (!playerDialog.open) playerDialog.showModal();
+ player.play().catch(() => {});
+}
+function updatePlaybackQuality() {
+ const {videoWidth: width, videoHeight: height} = player;
+ if (!playerDialog.open || !width || !height) return;
+ $('playerNote').textContent = videoQuality(width, height) + ' · ' + width + ' × ' + height + ' · Bản gốc';
+ fullscreen.hidden = !(document.fullscreenEnabled || player.webkitSupportsFullscreen);
+}
+player.addEventListener('loadedmetadata', updatePlaybackQuality);
+player.addEventListener('resize', updatePlaybackQuality);
+player.addEventListener('error', () => {
+ if (!playerDialog.open) return;
+ $('playerNote').textContent = 'Không phát được video. Hãy thử mở lại hoặc tải bản gốc.';
+ fullscreen.hidden = true;
+});
+fullscreen.onclick = async () => {
+ try {
+  if (document.fullscreenEnabled && player.requestFullscreen) await player.requestFullscreen();
+  else if (player.webkitSupportsFullscreen) player.webkitEnterFullscreen();
+ } catch {
+  $('playerNote').textContent = 'Không mở được toàn màn hình. Hãy thử nút toàn màn hình trên thanh điều khiển video.';
+ }
+};
+$('closePlayer').onclick = () => playerDialog.close();
+playerDialog.addEventListener('close', () => {
+ player.pause();
+ player.removeAttribute('src');
+ player.load();
+});
 async function downloadVideo(v){const {url}=await api('/videos/'+v.id+'/link');const a=element('a');a.href=url+'&download=1';a.download=v.name;document.body.append(a);a.click();a.remove()}
 $('playerDownload').onclick=()=>downloadVideo(currentVideo).catch(fail);
 function metadata(file){return new Promise(resolve=>{const v=document.createElement('video');const url=URL.createObjectURL(file);const done=()=>{clearTimeout(timer);const data={width:v.videoWidth||'',height:v.videoHeight||'',duration:Number.isFinite(v.duration)?v.duration:''};v.removeAttribute('src');v.load();URL.revokeObjectURL(url);resolve(data)};const timer=setTimeout(done,5000);v.onloadedmetadata=done;v.onerror=done;v.preload='metadata';v.src=url})}

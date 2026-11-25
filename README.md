@@ -8,7 +8,7 @@ Web quản lý video tiếng Việt, frontend HTML/CSS/JS và API Node.js/Expres
 - Tìm tên, lọc khoảng ngày upload theo múi giờ thiết bị, sắp xếp tên/mới/cũ.
 - Xem chất lượng gốc, tua bằng HTTP Range; tải xuống đúng byte gốc, không nén lại.
 - Video lớn chia thành phần 20 MiB, proxy ghép luồng từ GitHub. Giới hạn upload mặc định 2048 MiB/file.
-- MP4, WebM, MOV, MKV được nhận; khả năng phát phụ thuộc codec trình duyệt. Để xem Full HD cần file gốc 1080p; hệ thống không nâng độ phân giải.
+- MP4, WebM, MOV, MKV được nhận; khả năng phát phụ thuộc codec trình duyệt. Trình phát hỗ trợ bản gốc 4K (ví dụ 3840 × 2160) khi trình duyệt giải mã được video. Trình phát hiển thị kích thước khung hình thực tế, có nút toàn màn hình và giữ nguyên độ phân giải của file gốc.
 
 ## 1. Chuẩn bị Supabase
 1. Mở SQL Editor trong project kqmvhtuhneklsgwfaeds, chạy toàn bộ supabase/schema.sql một lần.
