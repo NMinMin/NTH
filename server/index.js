@@ -86,41 +86,45 @@ app.get('/api/videos/:id/link',auth,async(req,res)=>{
  const exp=Math.floor(Date.now()/1000)+21600;
  res.json({url:'/api/media/'+v.id+'?uid='+req.uid+'&exp='+exp+'&sig='+sign(v.id,req.uid,exp,secret)});
 });
-const sharePath = token => token ? '/watch#' + token : null;
+for (const table of ['videos', 'folders']) {
+ const endpoint = '/api/' + table + '/:id/share';
+ const watchPath = table === 'videos' ? '/watch#' : '/watch/folder#';
+ const sharePath = token => token ? watchPath + token : null;
 
-app.use('/api/videos/:id/share', auth, (req, res, next) => {
- res.set('Cache-Control', 'private, no-store');
- if (!uuid(req.params.id)) return res.sendStatus(404);
- next();
-});
+ const owned = (query, req) => {
+  const match = query.eq('id', req.params.id).eq('user_id', req.uid);
+  return table === 'videos' ? match.eq('status', 'ready') : match;
+ };
+ app.use(endpoint, auth, (req, res, next) => {
+  res.set('Cache-Control', 'private, no-store');
+  if (!uuid(req.params.id)) return res.sendStatus(404);
+  next();
+ });
 
-function ownedShareQuery(query, req) {
- return query.eq('id', req.params.id).eq('user_id', req.uid).eq('status', 'ready');
+ app.get(endpoint, async (req, res) => {
+  const item = check(await owned(db.from(table).select('share_token'), req).maybeSingle());
+  if (!item) return res.sendStatus(404);
+  res.json({path: sharePath(item.share_token)});
+ });
+
+ app.post(endpoint, async (req, res) => {
+  const token = randomBytes(32).toString('base64url');
+  const created = check(await owned(db.from(table).update({share_token: token}), req)
+   .is('share_token', null).select('share_token').maybeSingle());
+  if (created) return res.status(201).json({path: sharePath(created.share_token)});
+  const item = check(await owned(db.from(table).select('share_token'), req).maybeSingle());
+  if (!item) return res.sendStatus(404);
+  if (!item.share_token) return res.status(409).json({error:'Link vừa bị thu hồi. Hãy thử tạo lại.'});
+  res.json({path: sharePath(item.share_token)});
+ });
+
+ app.delete(endpoint, async (req, res) => {
+  const item = check(await owned(db.from(table).update({share_token: null}), req)
+   .select('id').maybeSingle());
+  if (!item) return res.sendStatus(404);
+  res.json({path: null});
+ });
 }
-
-app.get('/api/videos/:id/share', async (req, res) => {
- const video = check(await ownedShareQuery(db.from('videos').select('share_token'), req).maybeSingle());
- if (!video) return res.sendStatus(404);
- res.json({path: sharePath(video.share_token)});
-});
-
-app.post('/api/videos/:id/share', async (req, res) => {
- const token = randomBytes(32).toString('base64url');
- const created = check(await ownedShareQuery(db.from('videos').update({share_token: token}), req)
-  .is('share_token', null).select('share_token').maybeSingle());
- if (created) return res.status(201).json({path: sharePath(created.share_token)});
- const video = check(await ownedShareQuery(db.from('videos').select('share_token'), req).maybeSingle());
- if (!video) return res.sendStatus(404);
- if (!video.share_token) return res.status(409).json({error:'Link vừa bị thu hồi. Hãy thử tạo lại.'});
- res.json({path: sharePath(video.share_token)});
-});
-
-app.delete('/api/videos/:id/share', async (req, res) => {
- const video = check(await ownedShareQuery(db.from('videos').update({share_token: null}), req)
-  .select('id').maybeSingle());
- if (!video) return res.sendStatus(404);
- res.json({path: null});
-});
 
 async function sharedVideo(token, columns) {
  if (!/^[A-Za-z0-9_-]{43}$/.test(token)) return null;
@@ -138,6 +142,34 @@ app.get('/api/shared/:token', async (req, res) => {
 app.get('/api/shared/:token/media', async (req, res) => {
  res.set('Cache-Control', 'private, no-store');
  const video = await sharedVideo(req.params.token, 'name,mime,size,chunks');
+ if (!video) return res.sendStatus(404);
+ await streamVideo(req, res, video, req.query.download === '1');
+});
+
+async function sharedFolder(token) {
+ if (!/^[A-Za-z0-9_-]{43}$/.test(token)) return null;
+ return check(await db.from('folders').select('id,user_id,name').eq('share_token', token).maybeSingle());
+}
+
+function folderVideos(folder, columns) {
+ return db.from('videos').select(columns)
+  .eq('folder_id', folder.id).eq('user_id', folder.user_id).eq('status', 'ready');
+}
+
+app.get('/api/shared-folders/:token', async (req, res) => {
+ res.set('Cache-Control', 'private, no-store');
+ const folder = await sharedFolder(req.params.token);
+ if (!folder) return res.sendStatus(404);
+ const videos = check(await folderVideos(folder, 'id,name').order('created_at', {ascending:false}));
+ res.json({name: folder.name, videos: videos.map(({id, name}) => ({id, name}))});
+});
+
+app.get('/api/shared-folders/:token/videos/:id/media', async (req, res) => {
+ res.set('Cache-Control', 'private, no-store');
+ if (!uuid(req.params.id)) return res.sendStatus(404);
+ const folder = await sharedFolder(req.params.token);
+ if (!folder) return res.sendStatus(404);
+ const video = check(await folderVideos(folder, 'name,mime,size,chunks').eq('id', req.params.id).maybeSingle());
  if (!video) return res.sendStatus(404);
  await streamVideo(req, res, video, req.query.download === '1');
 });
@@ -169,7 +201,7 @@ async function streamVideo(req, res, v, download = false) {
   }res.end();
  }catch(e){if(!res.destroyed)res.destroy(e)}
 }
-app.get('/watch', (req, res) => {
+app.get(['/watch', '/watch/folder'], (req, res) => {
  res.set('Cache-Control', 'private, no-store');
  res.sendFile(path.join(root, 'public', 'watch.html'));
 });

@@ -15,6 +15,7 @@ function selectFolder(id){folder=id;render()}
 function render(){
  $('pageTitle').textContent=library.folders.find(f=>f.id===folder)?.name||'Tất cả video';
  $('renameFolder').hidden=!folder;
+ $('shareFolder').hidden=!folder;
  $('folderNav').replaceChildren();
  for(const f of library.folders){const b=element('button','nav'+(folder===f.id?' active':''),'▱  '+f.name);b.onclick=()=>selectFolder(f.id);$('folderNav').append(b)}
  $('allVideos').classList.toggle('active',!folder);
@@ -47,6 +48,10 @@ $('nameForm').onsubmit=async e=>{e.preventDefault();const b=e.submitter;b.disabl
 $('cancelName').onclick=()=>$('nameDialog').close();
 $('newFolder').onclick=()=>askName('Tạo thư mục','',async name=>{const f=await api('/folders',{method:'POST',body:JSON.stringify({name})});folder=f.id;await load()});
 $('renameFolder').onclick=()=>askName('Đổi tên thư mục',library.folders.find(f=>f.id===folder).name,async name=>{await api('/folders/'+folder,{method:'PATCH',body:JSON.stringify({name})});await load()});
+$('shareFolder').onclick = () => {
+ const selected = library.folders.find(item => item.id === folder);
+ if (selected) openSharing(selected, 'folders').catch(fail);
+};
 $('allVideos').onclick=()=>selectFolder(null);
 for(const id of ['search','fromDate','toDate','sort'])$(id).addEventListener('input',render);
 $('clearFilters').onclick=()=>{$('search').value='';$('fromDate').value='';$('toDate').value='';$('sort').value='new';render()};
@@ -57,15 +62,18 @@ function showShareLink(path) {
  shareLink.value = path ? new URL(path, location.origin).href : '';
  $('activeShare').hidden = !path;
  $('createShare').hidden = !!path;
+ const kind = $('shareStatus').dataset.kind;
+ const sharedContent = kind === 'thư mục' ? 'mọi video trong thư mục này' : 'video này';
  $('shareStatus').textContent = path
-  ? 'Ai có link đều có thể xem video.'
-  : 'Tạo link để người khác xem video.';
+  ? 'Ai có link đều có thể xem và tải ' + sharedContent + '.'
+  : 'Tạo link để chia sẻ ' + kind + '.';
 }
 
-async function openSharing(video) {
- const endpoint = '/videos/' + video.id + '/share';
+async function openSharing(item, table = 'videos') {
+ const endpoint = '/' + table + '/' + item.id + '/share';
  const {path} = await api(endpoint);
- $('shareTitle').textContent = 'Chia sẻ ' + video.name;
+ $('shareTitle').textContent = 'Chia sẻ ' + item.name;
+ $('shareStatus').dataset.kind = table === 'folders' ? 'thư mục' : 'video';
  showShareLink(path);
  $('createShare').onclick = async () => {
   const button = $('createShare');
@@ -171,8 +179,56 @@ for(const type of ['dragenter','dragover'])$('dropZone').addEventListener(type,e
 $('dropZone').addEventListener('dragleave',()=>$('dropZone').classList.remove('drag'));
 $('dropZone').addEventListener('drop',e=>{e.preventDefault();$('dropZone').classList.remove('drag');uploadFiles([...e.dataTransfer.files])});
 window.addEventListener('beforeunload',e=>{if(busy){e.preventDefault();e.returnValue=''}});
-$('switchAuth').onclick=()=>{signup=!signup;$('authTitle').textContent=signup?'Tạo tài khoản':'Đăng nhập';$('authSubmit').textContent=signup?'Đăng ký':'Đăng nhập';$('switchAuth').textContent=signup?'Đã có tài khoản? Đăng nhập':'Chưa có tài khoản? Đăng ký';$('password').autocomplete=signup?'new-password':'current-password';$('authMessage').textContent=''};
-$('authForm').onsubmit=async e=>{e.preventDefault();$('authSubmit').disabled=true;try{const credentials={email:$('email').value.trim(),password:$('password').value};const {data,error}=signup?await sb.auth.signUp({...credentials,options:{emailRedirectTo:location.origin}}):await sb.auth.signInWithPassword(credentials);if(error)throw error;if(signup&&!data.session)$('authMessage').textContent='Đã gửi email xác nhận. Mở email rồi quay lại đăng nhập.'}catch(e){$('authMessage').textContent=e.message}finally{$('authSubmit').disabled=false}};
+const passwordInput = $('password');
+const passwordToggle = $('togglePassword');
+
+function showPassword(visible) {
+ passwordInput.type = visible ? 'text' : 'password';
+ passwordToggle.textContent = visible ? 'Ẩn' : 'Hiện';
+ passwordToggle.setAttribute('aria-label', visible ? 'Ẩn mật khẩu' : 'Hiện mật khẩu');
+}
+showPassword(false);
+passwordToggle.onclick = () => showPassword(passwordInput.type === 'password');
+
+$('switchAuth').onclick = () => {
+ signup = !signup;
+ $('authTitle').textContent = signup ? 'Tạo tài khoản' : 'Đăng nhập';
+ $('authSubmit').textContent = signup ? 'Đăng ký' : 'Đăng nhập';
+ $('switchAuth').textContent = signup ? 'Đã có tài khoản? Đăng nhập' : 'Chưa có tài khoản? Đăng ký';
+ passwordInput.autocomplete = signup ? 'new-password' : 'current-password';
+ passwordInput.minLength = signup ? 8 : 0;
+ passwordInput.placeholder = signup ? 'Ít nhất 8 ký tự' : '';
+ showPassword(false);
+ $('authMessage').textContent = '';
+};
+
+$('authForm').onsubmit = async event => {
+ event.preventDefault();
+ const submit = $('authSubmit');
+ const switchMode = $('switchAuth');
+ const message = $('authMessage');
+ submit.disabled = true;
+ switchMode.disabled = true;
+ message.textContent = '';
+ try {
+  const credentials = {email:$('email').value.trim(), password:passwordInput.value};
+  showPassword(false);
+  const {data, error} = signup
+   ? await sb.auth.signUp(credentials)
+   : await sb.auth.signInWithPassword(credentials);
+  if (error) throw error;
+  if (!data.session) {
+   message.textContent = 'Chưa thể đăng nhập ngay. Kiểm tra cài đặt xác nhận email của NTH Video.';
+  } else {
+   passwordInput.value = '';
+  }
+ } catch (error) {
+  message.textContent = error.message;
+ } finally {
+  submit.disabled = false;
+  switchMode.disabled = false;
+ }
+};
 $('logout').onclick=async()=>{if(busy)return toast('Vui lòng đợi tải lên hoàn tất.');const {error}=await sb.auth.signOut();if(error)fail(error)};
 async function showSession(s){session=s;$('authView').hidden=!!s;$('appView').hidden=!s;if(s){$('accountEmail').textContent=s.user.email;await load()}else{library={folders:[],videos:[]};folder=null;$('playerDialog').close()}}
 (async()=>{try{const r=await fetch('/api/config');if(!r.ok)throw Error('Không kết nối được backend.');const config=await r.json();window.maxUploadMB=config.maxUploadMB;sb=window.supabase.createClient(config.supabaseUrl,config.supabaseKey);sb.auth.onAuthStateChange((event,s)=>{if(event==='INITIAL_SESSION'||event==='SIGNED_IN'||event==='SIGNED_OUT')setTimeout(()=>showSession(s).catch(fail),0)})}catch(e){$('authMessage').textContent=e.message}})();

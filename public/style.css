@@ -22,3 +22,14 @@
 #sharedPlayer:fullscreen{width:100%;height:100%;max-height:none;object-fit:contain}
 
 #sharedDownload{display:inline-block;border-radius:8px;padding:10px 14px;text-decoration:none}
+
+.password-field{margin-top:20px}
+.auth-card .password-field label{display:block;margin:0 0 8px}
+.password-input{position:relative}
+.password-input input{width:100%;padding-right:68px}
+#togglePassword{position:absolute;right:6px;top:50%;transform:translateY(-50%);border:0;padding:6px 10px;color:#087d69;font-size:.875rem}
+
+.folder-actions{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}
+#sharedFolderFiles{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:24px}
+#sharedFolderFiles button[aria-pressed="true"]{background:#087d69;color:white;border-color:#087d69}
+#sharedVideoTitle{overflow-wrap:anywhere}

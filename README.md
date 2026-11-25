@@ -2,10 +2,10 @@
 Web quản lý video tiếng Việt, frontend HTML/CSS/JS và API Node.js/Express triển khai trên Render. Supabase Auth + Postgres lưu tài khoản và metadata. Video được lưu thành các file .part 20 MiB trong folder của repository GitHub riêng tư.
 
 ## Tính năng
-- Đăng ký email/mật khẩu, xác nhận email, đăng nhập, đăng xuất và làm mới phiên qua Supabase.
+- Đăng ký email/mật khẩu và vào thư viện ngay, đăng nhập, đăng xuất và làm mới phiên qua Supabase.
 - Thư viện riêng theo tài khoản; API xác thực JWT bằng Supabase getUser, database bật RLS.
 - Kéo thả/chọn nhiều video, tiến trình tải, tạo và đổi tên thư mục, đổi tên hiển thị video.
-- Chia sẻ từng video qua link xem và tải bản gốc, kể cả 4K. Chủ video có thể thu hồi link.
+- Chia sẻ từng video hoặc cả thư mục bằng link xem và tải bản gốc, kể cả 4K. Chủ video hoặc thư mục có thể thu hồi link.
 - Tìm tên, lọc khoảng ngày upload theo múi giờ thiết bị, sắp xếp tên/mới/cũ.
 - Xem chất lượng gốc, tua bằng HTTP Range; tải xuống đúng byte gốc, không nén lại.
 - Video lớn chia thành phần 20 MiB, proxy ghép luồng từ GitHub. Giới hạn upload mặc định 2048 MiB/file.
@@ -13,12 +13,11 @@ Web quản lý video tiếng Việt, frontend HTML/CSS/JS và API Node.js/Expres
 
 ## 1. Chuẩn bị Supabase
 1. Mở SQL Editor trong project kqmvhtuhneklsgwfaeds, chạy toàn bộ supabase/schema.sql một lần.
-   Nếu đã chạy schema cũ, chạy riêng supabase/add-video-sharing.sql để bật chia sẻ.
-2. Authentication > Providers: bật Email. Nên giữ Confirm email bật.
+   Nếu đã chạy schema cũ, chạy supabase/add-video-sharing.sql để chia sẻ video và supabase/add-folder-sharing.sql để chia sẻ thư mục.
+2. Authentication > Sign In / Providers: bật Email và Allow new users to sign up, tắt Confirm email để đăng ký xong vào thư viện ngay.
 3. Authentication > URL Configuration: đặt Site URL thành URL Render sau deploy và thêm URL đó trong Redirect URLs; local dùng http://localhost:3000.
 4. Settings > API keys: lấy backend secret key (sb_secret_...) hoặc legacy service_role key. Điền vào SUPABASE_SERVICE_ROLE_KEY, tuyệt đối không đưa vào frontend/Git.
 5. Publishable key và project URL bạn cung cấp đã có trong .env.example và render.yaml. Khóa public không thay thế được khóa backend để ghi metadata.
-6. Với người dùng thực, cấu hình SMTP riêng trong Supabase để gửi email xác nhận ổn định.
 
 ## 2. Chuẩn bị repository lưu video
 1. Tạo một repo GitHub PRIVATE, khởi tạo README để có branch main.
@@ -63,7 +62,11 @@ Blueprint chọn plan starter; có thể đổi plan. Render cần dung lượng
 | GET | /api/videos/:id/link | Cấp URL phát/tải có chữ ký, hiệu lực 6 giờ |
 | GET | /api/media/:id?... | Luồng video; hỗ trợ Range, &download=1 |
 | GET / POST / DELETE | /api/videos/:id/share | Chủ video xem, tạo hoặc thu hồi link chia sẻ |
+| GET / POST / DELETE | /api/folders/:id/share | Chủ thư mục xem, tạo hoặc thu hồi link chia sẻ |
 | GET | /watch#TOKEN | Trang xem video được chia sẻ |
+| GET | /watch/folder#TOKEN | Trang xem các video đã tải xong trong thư mục |
+| GET | /api/shared-folders/:token | Tên thư mục và danh sách video |
+| GET | /api/shared-folders/:token/videos/:id/media | Phát hoặc tải video thuộc thư mục bằng ?download=1 |
 | GET | /api/shared/:token | Tên video được chia sẻ |
 | GET | /api/shared/:token/media | Luồng video được chia sẻ, hỗ trợ Range và tải bản gốc bằng ?download=1 |
 
