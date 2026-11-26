@@ -232,15 +232,15 @@ $('copyShare').onclick = async () => {
 const player = $('player');
 const playerDialog = $('playerDialog');
 const fullscreen = $('playerFullscreen');
+const videoPlayback = createVideoPlayback(player, $('playerNote'), $('playerStream'));
 async function play(video) {
  const {url} = await api('/videos/'+video.id+'/link');
  currentVideo = video;
  $('playerTitle').textContent = video.name;
  $('playerNote').textContent = 'Đang tải video gốc…';
  fullscreen.hidden = true;
- player.src = url;
  if (!playerDialog.open) playerDialog.showModal();
- player.play().catch(() => {});
+ videoPlayback.start(video, url, true);
 }
 function updatePlaybackQuality() {
  const {videoWidth: width, videoHeight: height} = player;
@@ -264,11 +264,7 @@ fullscreen.onclick = async () => {
  }
 };
 $('closePlayer').onclick = () => playerDialog.close();
-playerDialog.addEventListener('close', () => {
- player.pause();
- player.removeAttribute('src');
- player.load();
-});
+playerDialog.addEventListener('close', videoPlayback.stop);
 async function downloadVideo(v){const {url}=await api('/videos/'+v.id+'/link');const a=element('a');a.href=url+'&download=1';a.download=v.name;document.body.append(a);a.click();a.remove()}
 $('playerDownload').onclick=()=>downloadVideo(currentVideo).catch(fail);
 function metadata(file){return new Promise(resolve=>{const v=document.createElement('video');const url=URL.createObjectURL(file);const done=()=>{clearTimeout(timer);const data={width:v.videoWidth||'',height:v.videoHeight||'',duration:Number.isFinite(v.duration)?v.duration:''};v.removeAttribute('src');v.load();URL.revokeObjectURL(url);resolve(data)};const timer=setTimeout(done,5000);v.onloadedmetadata=done;v.onerror=done;v.preload='metadata';v.src=url})}

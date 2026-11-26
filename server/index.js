@@ -247,9 +247,9 @@ async function sharedVideo(token, columns) {
 
 app.get('/api/shared/:token', async (req, res) => {
  res.set('Cache-Control', 'private, no-store');
- const video = await sharedVideo(req.params.token, 'name');
+ const video = await sharedVideo(req.params.token, 'name,size,duration');
  if (!video) return res.sendStatus(404);
- res.json({name: repairVideoName(video.name)});
+ res.json({name: repairVideoName(video.name), size:video.size, duration:video.duration});
 });
 
 app.get('/api/shared/:token/media', async (req, res) => {

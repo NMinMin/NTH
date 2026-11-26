@@ -83,7 +83,7 @@ test('API permissions and cross-part streaming',async t=>{
  const sharedEndpoint = base + '/api/shared/' + share.path.split('#')[1];
  const sharedInfo = await fetch(sharedEndpoint);
  assert.match(sharedInfo.headers.get('cache-control'),/no-store/);
- assert.deepEqual(await sharedInfo.json(),{name:'Nghịch Thủy Hàn.mp4'});
+ assert.deepEqual(await sharedInfo.json(),{name:'Nghịch Thủy Hàn.mp4',size:10});
  const sharedRange = await fetch(sharedEndpoint+'/media',{headers:{Range:'bytes=3-7'}});
  assert.equal(sharedRange.status,206);
  assert.equal(await sharedRange.text(),'defgh');

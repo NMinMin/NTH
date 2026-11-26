@@ -7,14 +7,11 @@ const fileList = byId('sharedFolderFiles');
 const playback = byId('sharedPlayback');
 const playerStatus = byId('sharedPlayerStatus');
 const preview = byId('sharedPreview');
+const videoPlayback = createVideoPlayback(player, playerStatus, byId('sharedStream'));
 
 fileBrowser.bindLayout(byId('sharedLayout'), fileList);
 byId('closeSharedPreview').onclick = () => preview.close();
-preview.addEventListener('close', () => {
- player.pause();
- player.removeAttribute('src');
- player.load();
-});
+preview.addEventListener('close', videoPlayback.stop);
 
 player.addEventListener('loadedmetadata', () => {
  const {videoWidth:width, videoHeight:height} = player;
@@ -27,12 +24,12 @@ player.addEventListener('error', () => {
  playerStatus.textContent = 'Không phát được video. Link có thể đã bị thu hồi hoặc trình duyệt không hỗ trợ định dạng này.';
 });
 
-function showVideo(video, mediaUrl) {
+function showVideo(video, mediaUrl, autoplay = false) {
  playerStatus.textContent = 'Đang tải thông tin video.';
  download.href = mediaUrl + '?download=1';
  download.download = video.name;
  playback.hidden = false;
- player.src = mediaUrl;
+ videoPlayback.start(video, mediaUrl, autoplay);
 }
 
 function showFolder(folder, endpoint) {
@@ -45,9 +42,8 @@ function showFolder(folder, endpoint) {
   return fileBrowser.videoCard(video, {
    open:() => {
     byId('sharedVideoTitle').textContent = video.name;
-    showVideo(video, mediaUrl);
     preview.showModal();
-    player.play().catch(() => {});
+    showVideo(video, mediaUrl, true);
    },
    options:[{label:'Tải bản gốc', href:mediaUrl + '?download=1'}]
   });
