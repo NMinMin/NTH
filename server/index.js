@@ -58,16 +58,6 @@ for(const table of ['videos','folders'])app.patch('/api/'+table+'/:id',auth,asyn
  if(!r)return res.sendStatus(404);res.json(r);
 });
 const upload=multer({dest:tmp,limits:{fileSize:Number(process.env.MAX_UPLOAD_MB||2048)*1024*1024,files:1,fields:5},fileFilter(req,file,cb){cb(null,['video/mp4','video/webm','video/quicktime','video/x-matroska'].includes(file.mimetype))}});
-function uploadGitHubMessage(error) {
- const {upstreamStatus: status, stage} = error;
- if (status === 401) return 'Token GitHub không hợp lệ hoặc đã hết hạn. Hãy cập nhật GITHUB_TOKEN trên Render.';
- if (status === 404 && stage === 'repo') return 'GitHub không tìm thấy repo lưu video hoặc token chưa được cấp quyền vào repo. Kiểm tra GITHUB_OWNER, GITHUB_REPO và quyền Contents: Read and write.';
- if (status === 404 && stage === 'branch') return 'Không tìm thấy nhánh lưu video trên GitHub. Kiểm tra GITHUB_BRANCH và tạo commit đầu tiên cho repo.';
- if (status === 403 || status === 404) return 'GitHub từ chối truy cập. Kiểm tra token có quyền Contents: Read and write cho repo lưu video và nhánh có cho phép ghi trực tiếp.';
- if (status === 409 || status === 422) return 'GitHub từ chối ghi video vào nhánh lưu trữ. Kiểm tra quy tắc bảo vệ nhánh hoặc thử lại.';
- if (!status || status === 429 || status >= 500) return 'GitHub chưa phản hồi hoặc đang giới hạn yêu cầu. Hãy thử tải lên lại.';
- return 'Không lưu được video lên GitHub. Kiểm tra Render Logs để biết mã lỗi.';
-}
 const active=new Set();
 const deletingFolders = new Set();
 app.post('/api/videos',auth,async(req,res,next)=>{
@@ -84,7 +74,8 @@ app.post('/api/videos',auth,async(req,res,next)=>{
   }
   if(folder&&(!uuid(folder)||!check(await db.from('folders').select('id').eq('id',folder).eq('user_id',req.uid).maybeSingle()))){const e=Error('Thư mục không tồn tại.');e.status=400;throw e}
   if (!(await isPrivateVideoRepo())) {
-   return res.status(409).json({error:'Repo lưu video trên GitHub phải ở chế độ Private.'});
+   console.error('Video storage repository must be private');
+   return res.status(409).json({error:'Chưa thể lưu video. Vui lòng thử lại sau.'});
   }
   await checkVideoBranch();
   const videoId = randomUUID();
@@ -112,7 +103,7 @@ app.post('/api/videos',auth,async(req,res,next)=>{
   }
   if (e instanceof GitHubRequestError) {
    console.error('Video upload failed:', e.message);
-   return res.status(502).json({error:uploadGitHubMessage(e)});
+   return res.status(502).json({error:'Chưa thể lưu video. Vui lòng thử tải lại.'});
   }
   next(e);
  } finally {
@@ -142,7 +133,7 @@ async function removeStoredVideo(userId, id) {
    await deleteVideoChunks(userId, video.id, video.chunks);
   } catch (error) {
    console.error('GitHub video deletion failed:', error.message);
-   return {status:502, error:'Chưa xóa hết video trên GitHub. Hãy thử xóa lại để tiếp tục.'};
+   return {status:502, error:'Chưa xóa xong video. Vui lòng thử lại.'};
   }
   check(await owned(db.from('videos').delete()).eq('status', 'deleting'));
   return null;
@@ -344,7 +335,7 @@ app.get(['/watch', '/watch/folder'], (req, res) => {
 });
 app.use('/vendor',express.static(path.join(root,'node_modules/@supabase/supabase-js/dist/umd')));
 app.use(express.static(path.join(root,'public')));
-app.use((err,req,res,next)=>{if(res.headersSent)return next(err);console.error(err.message);res.status(err.code==='LIMIT_FILE_SIZE'?413:err.status||500).json({error:err.code==='LIMIT_FILE_SIZE'?'Video vượt dung lượng cho phép.':err.status&&err.status<500?err.message:'Có lỗi khi xử lý. Kiểm tra cấu hình backend hoặc thử lại.'})});
+app.use((err,req,res,next)=>{if(res.headersSent)return next(err);console.error(err.message);res.status(err.code==='LIMIT_FILE_SIZE'?413:err.status||500).json({error:err.code==='LIMIT_FILE_SIZE'?'Video vượt dung lượng cho phép.':err.status&&err.status<500?err.message:'Có lỗi xảy ra. Vui lòng thử lại.'})});
 const server=app.listen(process.env.PORT||3000,()=>console.log('NTH Video ready'));
 server.requestTimeout=0;
 server.headersTimeout=60000;

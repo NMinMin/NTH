@@ -33,7 +33,7 @@
    <p id="sharedEmpty" class="browser-empty" hidden>Thư mục này chưa có video.</p>
   </section>
   <section id="sharedPlayback" hidden>
-   <video id="sharedPlayer" controls playsinline preload="metadata"></video>
+   <div class="video-stage"><video id="sharedPlayer" controls playsinline preload="metadata"></video><span class="video-loading" role="status" hidden><span>Đang tải video</span></span></div>
    <div class="player-toolbar"><p id="sharedPlayerStatus" role="status"></p><button id="sharedStream" type="button" hidden>Phát ngay</button><a id="sharedDownload" class="primary" download>Tải bản gốc</a></div>
   </section>
  </main>

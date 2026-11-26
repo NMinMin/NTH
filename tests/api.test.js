@@ -40,10 +40,10 @@ test('API permissions and cross-part streaming',async t=>{
  publicRepoUpload.append('video', new Blob(['abc'], {type:'video/mp4'}), 'private.mp4');
  const missingRepo = await fetch(base+'/api/videos', {method:'POST',headers,body:publicRepoUpload});
  assert.equal(missingRepo.status,502);
- assert.match((await missingRepo.json()).error,/GITHUB_OWNER.*GITHUB_REPO.*Contents: Read and write/);
+ assert.match((await missingRepo.json()).error,/Chưa thể lưu video/);
  const blocked = await fetch(base+'/api/videos', {method:'POST',headers,body:publicRepoUpload});
  assert.equal(blocked.status,409);
- assert.match((await blocked.json()).error,/Private/);
+ assert.match((await blocked.json()).error,/Chưa thể lưu video/);
  const input=Buffer.alloc(20*1024*1024+17,65);input.write('CROSS-PART-END',20*1024*1024-3);
  const form=new FormData();
  const originalName = 'Thử video 4K – tiếng Việt.mp4';

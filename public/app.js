@@ -2,11 +2,15 @@ const $=id=>document.getElementById(id);
 let sb,session,library={folders:[],videos:[]},folder=null,signup=false,naming=null,currentVideo=null,busy=false;
 let toastTimer;
 function toast(message){$('toast').textContent=message;$('toast').hidden=false;clearTimeout(toastTimer);toastTimer=setTimeout(()=>$('toast').hidden=true,6500)}
-function fail(e){toast(e.message||'Có lỗi xảy ra.')}
-async function token(){const {data,error}=await sb.auth.getSession();if(error)throw error;if(!data.session)throw Error('Vui lòng đăng nhập lại.');return data.session.access_token}
+class UserMessage extends Error {}
+function messageFor(error, fallback = 'Có lỗi xảy ra. Vui lòng thử lại.') {
+ return error instanceof UserMessage ? error.message : fallback;
+}
+function fail(error){toast(messageFor(error))}
+async function token(){const {data,error}=await sb.auth.getSession();if(error||!data.session)throw new UserMessage('Vui lòng đăng nhập lại.');return data.session.access_token}
 async function api(url,options={}){
  const r=await fetch('/api'+url,{...options,headers:{Authorization:'Bearer '+await token(),'Content-Type':'application/json',...options.headers}});
- if(!r.ok){let d;try{d=await r.json()}catch{}throw Error(d?.error||'Không thể xử lý yêu cầu ('+r.status+').')}
+ if(!r.ok){let d;try{d=await r.json()}catch{}throw new UserMessage(d?.error||'Không thể thực hiện yêu cầu. Vui lòng thử lại.')}
  return r.json();
 }
 const {element, card, videoCard, bindLayout} = fileBrowser;
@@ -23,7 +27,7 @@ const pendingFolderDeletes = new Set();
 
 async function deleteFolder(item, button) {
  if (pendingFolderDeletes.has(item.id)) return;
- if (!window.confirm('Xóa thư mục "' + item.name + '" và toàn bộ video bên trong khỏi thư viện và nhánh lưu trữ trên GitHub? Các link chia sẻ sẽ ngừng hoạt động.')) return;
+ if (!window.confirm('Xóa thư mục "' + item.name + '" và toàn bộ video bên trong khỏi thư viện? Các link chia sẻ sẽ ngừng hoạt động.')) return;
 
  pendingFolderDeletes.add(item.id);
  button.disabled = true;
@@ -33,7 +37,7 @@ async function deleteFolder(item, button) {
   library.videos = library.videos.filter(video => video.folder_id !== item.id);
   if (folder === item.id) selectFolder(null);
   else render();
-  toast('Đã xóa thư mục và video bên trong khỏi thư viện và nhánh lưu trữ trên GitHub.');
+  toast('Đã xóa thư mục và video bên trong khỏi thư viện.');
  } catch (error) {
   await load().catch(() => {});
   fail(error);
@@ -131,7 +135,7 @@ function render() {
 
 async function deleteVideo(video, button) {
  if (video.status !== 'deleting' && !window.confirm(
-  'Xóa “' + video.name + '” khỏi thư viện và nhánh lưu trữ trên GitHub? Link chia sẻ của video sẽ ngừng hoạt động.'
+  'Xóa “' + video.name + '” khỏi thư viện? Link chia sẻ của video sẽ ngừng hoạt động.'
  )) return;
 
  button.disabled = true;
@@ -139,7 +143,7 @@ async function deleteVideo(video, button) {
   await api('/videos/' + video.id, {method:'DELETE'});
   library.videos = library.videos.filter(item => item.id !== video.id);
   render();
-  toast('Đã xóa video khỏi thư viện và nhánh lưu trữ trên GitHub.');
+  toast('Đã xóa video khỏi thư viện.');
  } catch (error) {
   await load().catch(() => {});
   fail(error);
@@ -198,7 +202,7 @@ async function openSharing(item, table = 'videos') {
    const result = await api(endpoint, {method:'POST'});
    showShareLink(result.path);
   } catch (error) {
-   $('shareStatus').textContent = error.message;
+   $('shareStatus').textContent = messageFor(error);
   } finally {
    button.disabled = false;
   }
@@ -211,7 +215,7 @@ async function openSharing(item, table = 'videos') {
    showShareLink(null);
    $('shareStatus').textContent = 'Đã thu hồi link chia sẻ.';
   } catch (error) {
-   $('shareStatus').textContent = error.message;
+   $('shareStatus').textContent = messageFor(error);
   } finally {
    button.disabled = false;
   }
@@ -232,7 +236,7 @@ $('copyShare').onclick = async () => {
 const player = $('player');
 const playerDialog = $('playerDialog');
 const fullscreen = $('playerFullscreen');
-const videoPlayback = createVideoPlayback(player, $('playerNote'), $('playerStream'));
+const videoPlayback = createVideoPlayback(player, $('playerStream'));
 async function play(video) {
  const {url} = await api('/videos/'+video.id+'/link');
  currentVideo = video;
@@ -268,7 +272,7 @@ playerDialog.addEventListener('close', videoPlayback.stop);
 async function downloadVideo(v){const {url}=await api('/videos/'+v.id+'/link');const a=element('a');a.href=url+'&download=1';a.download=v.name;document.body.append(a);a.click();a.remove()}
 $('playerDownload').onclick=()=>downloadVideo(currentVideo).catch(fail);
 function metadata(file){return new Promise(resolve=>{const v=document.createElement('video');const url=URL.createObjectURL(file);const done=()=>{clearTimeout(timer);const data={width:v.videoWidth||'',height:v.videoHeight||'',duration:Number.isFinite(v.duration)?v.duration:''};v.removeAttribute('src');v.load();URL.revokeObjectURL(url);resolve(data)};const timer=setTimeout(done,5000);v.onloadedmetadata=done;v.onerror=done;v.preload='metadata';v.src=url})}
-function uploadOne(data,accessToken){return new Promise((resolve,reject)=>{const xhr=new XMLHttpRequest();xhr.open('POST','/api/videos');xhr.setRequestHeader('Authorization','Bearer '+accessToken);xhr.upload.onprogress=e=>{if(e.lengthComputable){$('uploadProgress').value=e.loaded/e.total*100;if(e.loaded===e.total)$('uploadStatus').textContent='Đang lưu các phần video lên GitHub…'}};xhr.onload=()=>{if(xhr.status>=200&&xhr.status<300)resolve();else{let d;try{d=JSON.parse(xhr.responseText)}catch{}reject(Error(d?.error||'Tải lên thất bại ('+xhr.status+').'))}};xhr.onerror=()=>reject(Error('Mất kết nối. Kiểm tra thư viện trước khi tải lại.'));xhr.send(data)})}
+function uploadOne(data,accessToken){return new Promise((resolve,reject)=>{const xhr=new XMLHttpRequest();xhr.open('POST','/api/videos');xhr.setRequestHeader('Authorization','Bearer '+accessToken);xhr.upload.onprogress=e=>{if(e.lengthComputable){$('uploadProgress').value=e.loaded/e.total*100;if(e.loaded===e.total)$('uploadStatus').textContent='Đang lưu video…'}};xhr.onload=()=>{if(xhr.status>=200&&xhr.status<300)resolve();else{let d;try{d=JSON.parse(xhr.responseText)}catch{}reject(new UserMessage(d?.error||'Tải lên thất bại. Vui lòng thử lại.'))}};xhr.onerror=()=>reject(new UserMessage('Mất kết nối. Kiểm tra thư viện trước khi tải lại.'));xhr.send(data)})}
 async function uploadFiles(files){
  if(busy)return toast('Vui lòng chờ lượt tải hiện tại hoàn tất.');if(!files.length)return;
  busy=true;$('uploadButton').disabled=true;$('uploadPanel').hidden=false;
@@ -284,7 +288,7 @@ async function uploadFiles(files){
   if (targetFolder) data.append('folderId', targetFolder);
   for (const [key, value] of Object.entries(meta)) data.append(key, value);
   data.append('video', new Blob([file], {type:mime}), file.name);
-  try{await uploadOne(data,await token());success++}catch(e){toast(file.name+': '+e.message)}
+  try{await uploadOne(data,await token());success++}catch(e){toast(file.name+': '+messageFor(e, 'Tải lên thất bại. Vui lòng thử lại.'))}
  }$('uploadStatus').textContent='Hoàn tất '+success+'/'+files.length+' video.';await load();
  }catch(e){fail(e)}finally{busy=false;$('uploadButton').disabled=false;$('fileInput').value=''}
 }
@@ -339,13 +343,19 @@ $('authForm').onsubmit = async event => {
    passwordInput.value = '';
   }
  } catch (error) {
-  message.textContent = error.message;
+  const authMessages = {
+   invalid_credentials:'Email hoặc mật khẩu chưa đúng.',
+   email_not_confirmed:'Vui lòng xác nhận email trước khi đăng nhập.',
+   user_already_exists:'Email này đã được đăng ký.',
+   weak_password:'Hãy chọn mật khẩu mạnh hơn.'
+  };
+  message.textContent = authMessages[error.code] || 'Chưa thể tiếp tục. Vui lòng thử lại.';
  } finally {
   submit.disabled = false;
   switchMode.disabled = false;
  }
 };
 $('logout').onclick=async()=>{if(busy)return toast('Vui lòng đợi tải lên hoàn tất.');const {error}=await sb.auth.signOut();if(error)fail(error)};
-async function showSession(s){session=s;$('authView').hidden=!!s;$('appView').hidden=!s;if(s){$('accountEmail').textContent=s.user.email;await load()}else{library={folders:[],videos:[]};folder=null;$('playerDialog').close()}}
-(async()=>{try{const r=await fetch('/api/config');if(!r.ok)throw Error('Không kết nối được backend.');const config=await r.json();window.maxUploadMB=config.maxUploadMB;sb=window.supabase.createClient(config.supabaseUrl,config.supabaseKey);sb.auth.onAuthStateChange((event,s)=>{if(event==='INITIAL_SESSION'||event==='SIGNED_IN'||event==='SIGNED_OUT')setTimeout(()=>showSession(s).catch(fail),0)})}catch(e){$('authMessage').textContent=e.message}})();
+async function showSession(s){if(session?.user.id!==s?.user.id)videoPlayback.clear();session=s;$('authView').hidden=!!s;$('appView').hidden=!s;if(s){$('accountEmail').textContent=s.user.email;await load()}else{library={folders:[],videos:[]};folder=null;$('playerDialog').close()}}
+(async()=>{try{const r=await fetch('/api/config');if(!r.ok)throw Error('Không thể kết nối. Vui lòng thử lại.');const config=await r.json();window.maxUploadMB=config.maxUploadMB;sb=window.supabase.createClient(config.supabaseUrl,config.supabaseKey);sb.auth.onAuthStateChange((event,s)=>{if(event==='INITIAL_SESSION'||event==='SIGNED_IN'||event==='SIGNED_OUT')setTimeout(()=>showSession(s).catch(fail),0)})}catch(e){$('authMessage').textContent='Không thể mở thư viện. Vui lòng thử lại.'}})();
 

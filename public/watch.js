@@ -7,7 +7,7 @@ const fileList = byId('sharedFolderFiles');
 const playback = byId('sharedPlayback');
 const playerStatus = byId('sharedPlayerStatus');
 const preview = byId('sharedPreview');
-const videoPlayback = createVideoPlayback(player, playerStatus, byId('sharedStream'));
+const videoPlayback = createVideoPlayback(player, byId('sharedStream'));
 
 fileBrowser.bindLayout(byId('sharedLayout'), fileList);
 byId('closeSharedPreview').onclick = () => preview.close();
@@ -25,7 +25,7 @@ player.addEventListener('error', () => {
 });
 
 function showVideo(video, mediaUrl, autoplay = false) {
- playerStatus.textContent = 'Đang tải thông tin video.';
+ playerStatus.textContent = '';
  download.href = mediaUrl + '?download=1';
  download.download = video.name;
  playback.hidden = false;
