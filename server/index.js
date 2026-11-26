@@ -7,10 +7,10 @@ import multer from 'multer';
 import {createClient} from '@supabase/supabase-js';
 import {mkdir,open,unlink} from 'node:fs/promises';
 import {randomBytes,randomUUID} from 'node:crypto';
-import {once} from 'node:events';
+import {loadVideoPart,writeVideoPart} from './video-cache.js';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {putChunk,getChunk,isPrivateVideoRepo,videoDirectory,deleteVideoChunks,checkVideoBranch,GitHubRequestError} from './github.js';
+import {putChunk,isPrivateVideoRepo,videoDirectory,deleteVideoChunks,checkVideoBranch,GitHubRequestError} from './github.js';
 import {sign,verify,rangeOf} from './media.js';
 const required=['SUPABASE_URL','SUPABASE_PUBLISHABLE_KEY','SUPABASE_SERVICE_ROLE_KEY','GITHUB_TOKEN','GITHUB_OWNER','GITHUB_REPO','MEDIA_SIGNING_SECRET','APP_ORIGIN'];
 for(const key of required)if(!process.env[key])throw Error('Missing '+key);
@@ -309,22 +309,15 @@ async function streamVideo(req, res, v, download = false) {
  const {signal} = controller;
  res.once('close', () => controller.abort());
  const parts = videoParts(v.chunks, start, end);
- // Start the next GitHub request while the current body streams. Fetch keeps
- // the unread body subject to backpressure, so we don't buffer entire parts.
- const fetchPart = ({sha}) => getChunk(sha, signal).then(
-  response => ({response}),
-  error => ({error})
- );
  let part = parts.next().value;
- let pending = part && fetchPart(part);
  try {
+  let cached = part && loadVideoPart(part.sha, part.size);
   while (part) {
-   const {response, error} = await pending;
-   if (error) throw error;
    const next = parts.next().value;
-   pending = next && fetchPart(next);
-   await writeVideoPart(response.body, part, res, signal);
+   const prefetched = next && loadVideoPart(next.sha, next.size);
+   await writeVideoPart(cached, part, res, signal);
    part = next;
+   cached = prefetched;
   }
   res.end();
  } catch (error) {
@@ -339,29 +332,9 @@ function* videoParts(chunks, start, end) {
  for (const {sha, size} of chunks) {
   const from = Math.max(0, start - offset);
   const to = Math.min(size, end - offset + 1);
-  if (from < to) yield {sha, from, to};
+  if (from < to) yield {sha, size, from, to};
   offset += size;
   if (offset > end) return;
- }
-}
-
-async function writeVideoPart(body, {from, to}, res, signal) {
- const reader = body.getReader();
- let offset = 0;
- try {
-  while (offset < to) {
-   signal.throwIfAborted();
-   const {done, value} = await reader.read();
-   if (done) throw Error('Incomplete video part from GitHub');
-   const start = Math.max(0, from - offset);
-   const end = Math.min(value.length, to - offset);
-   offset += value.length;
-   if (end > start && !res.write(value.subarray(start, end))) {
-    await once(res, 'drain', {signal});
-   }
-  }
- } finally {
-  await reader.cancel().catch(() => {});
  }
 }
 

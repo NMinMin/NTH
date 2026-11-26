@@ -3,7 +3,7 @@ const realFetch=globalThis.fetch;
 const uid='11111111-1111-4111-8111-111111111111',id='22222222-2222-4222-8222-222222222222';
 const rows=[{id,user_id:uid,name:Buffer.from('Nghịch Thủy Hàn.mp4','utf8').toString('latin1'),mime:'video/mp4',size:10,status:'ready',chunks:[{sha:'chunk1',size:5},{sha:'chunk2',size:5}]}];
 let repositoryChecks = 0;
-let streamFirstPart = true;
+const playbackReads = new Set();
 let finishFirstPart;
 let failSecondDelete = true;
 const trackedFiles = new Map();
@@ -82,8 +82,11 @@ globalThis.fetch=async(input,options={})=>{
   const sha = url.pathname.split('/').pop();
   // The first full playback can finish only if the next part is requested
   // while the first response body is still in progress.
-  if (sha === 'chunk1' && streamFirstPart) {
-   streamFirstPart = false;
+  if (sha === 'chunk1' || sha === 'chunk2') {
+   if (playbackReads.has(sha)) throw Error('Playback fetched the same GitHub part twice');
+   playbackReads.add(sha);
+  }
+  if (sha === 'chunk1') {
    return new Response(new ReadableStream({
     start(controller) {
      controller.enqueue(blobs.get(sha).subarray(0, 2));
