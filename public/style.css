@@ -27,3 +27,5 @@
 .folder-actions{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}
 
 .card-actions .delete-video{color:#a73529}
+
+#playerDialog::backdrop,#sharedPreview::backdrop{backdrop-filter:none}

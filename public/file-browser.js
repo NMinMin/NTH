@@ -1,5 +1,5 @@
 const fileBrowser = (() => {
- const dateFormat = new Intl.DateTimeFormat('vi-VN', {dateStyle:'medium'});
+ const uploadDateFormat = new Intl.DateTimeFormat('vi-VN', {dateStyle:'medium', timeStyle:'short'});
 
  function element(tag, className, text) {
   const node = document.createElement(tag);
@@ -92,7 +92,8 @@ const fileBrowser = (() => {
  function videoCard(video, {open, options, extra}) {
   const {name, width, height, duration, size, created_at: createdAt} = video;
   const time = duration > 0 ? Math.floor(duration / 60) + ':' + String(Math.floor(duration % 60)).padStart(2, '0') : '';
-  const meta = [createdAt && dateFormat.format(new Date(createdAt)), formatSize(size), extra].filter(Boolean).join(' · ');
+  const uploadedAt = createdAt && 'Tải lên ' + uploadDateFormat.format(new Date(createdAt));
+  const meta = [uploadedAt, formatSize(size), extra].filter(Boolean).join(' · ');
   return card({name, type:'video', meta, open, options, quality:width && height ? videoQuality(width, height) : '', duration:time});
  }
 

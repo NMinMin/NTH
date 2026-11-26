@@ -305,18 +305,66 @@ async function streamVideo(req, res, v, download = false) {
  if(partial)res.set('Content-Range',`bytes ${start}-${end}/${v.size}`);
  if(download)res.set('Content-Disposition',"attachment; filename=\"video\"; filename*=UTF-8''"+encodeURIComponent(repairVideoName(v.name)).replace(/['()*]/g,c=>'%'+c.charCodeAt(0).toString(16)));
  if (req.method === 'HEAD') return res.end();
- const controller=new AbortController();res.on('close',()=>controller.abort());
- let offset=0;
- try{
-  for(const chunk of v.chunks){
-   const lo=Math.max(0,start-offset),hi=Math.min(chunk.size-1,end-offset);offset+=chunk.size;
-   if(lo>hi)continue;
-   const upstream=await getChunk(chunk.sha,controller.signal);const reader=upstream.body.getReader();let seen=0;
-   try{while(true){const {done,value}=await reader.read();if(done)break;const a=Math.max(0,lo-seen),b=Math.min(value.length,hi-seen+1);seen+=value.length;if(b>a&&!res.write(value.subarray(a,b)))await once(res,'drain',{signal:controller.signal});if(seen>hi)break}}finally{await reader.cancel().catch(()=>{})}
-   if(offset>end)break;
-  }res.end();
- }catch(e){if(!res.destroyed)res.destroy(e)}
+ const controller = new AbortController();
+ const {signal} = controller;
+ res.once('close', () => controller.abort());
+ const parts = videoParts(v.chunks, start, end);
+ // Start the next GitHub request while the current body streams. Fetch keeps
+ // the unread body subject to backpressure, so we don't buffer entire parts.
+ const fetchPart = ({sha}) => getChunk(sha, signal).then(
+  response => ({response}),
+  error => ({error})
+ );
+ let part = parts.next().value;
+ let pending = part && fetchPart(part);
+ try {
+  while (part) {
+   const {response, error} = await pending;
+   if (error) throw error;
+   const next = parts.next().value;
+   pending = next && fetchPart(next);
+   await writeVideoPart(response.body, part, res, signal);
+   part = next;
+  }
+  res.end();
+ } catch (error) {
+  if (!res.destroyed) res.destroy(error);
+ } finally {
+  controller.abort();
+ }
 }
+
+function* videoParts(chunks, start, end) {
+ let offset = 0;
+ for (const {sha, size} of chunks) {
+  const from = Math.max(0, start - offset);
+  const to = Math.min(size, end - offset + 1);
+  if (from < to) yield {sha, from, to};
+  offset += size;
+  if (offset > end) return;
+ }
+}
+
+async function writeVideoPart(body, {from, to}, res, signal) {
+ const reader = body.getReader();
+ let offset = 0;
+ try {
+  while (offset < to) {
+   signal.throwIfAborted();
+   const {done, value} = await reader.read();
+   if (done) throw Error('Incomplete video part from GitHub');
+   const start = Math.max(0, from - offset);
+   const end = Math.min(value.length, to - offset);
+   offset += value.length;
+   if (end > start && !res.write(value.subarray(start, end))) {
+    await once(res, 'drain', {signal});
+   }
+  }
+ } finally {
+  await reader.cancel().catch(() => {});
+ }
+}
+
 app.get(['/watch', '/watch/folder'], (req, res) => {
  res.set('Cache-Control', 'private, no-store');
  res.sendFile(path.join(root, 'public', 'watch.html'));

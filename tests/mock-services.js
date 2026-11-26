@@ -3,6 +3,8 @@ const realFetch=globalThis.fetch;
 const uid='11111111-1111-4111-8111-111111111111',id='22222222-2222-4222-8222-222222222222';
 const rows=[{id,user_id:uid,name:Buffer.from('Nghịch Thủy Hàn.mp4','utf8').toString('latin1'),mime:'video/mp4',size:10,status:'ready',chunks:[{sha:'chunk1',size:5},{sha:'chunk2',size:5}]}];
 let repositoryChecks = 0;
+let streamFirstPart = true;
+let finishFirstPart;
 let failSecondDelete = true;
 const trackedFiles = new Map();
 const folders=[];const blobs=new Map([['chunk1',Buffer.from('abcde')],['chunk2',Buffer.from('fghij')]]);
@@ -77,7 +79,27 @@ globalThis.fetch=async(input,options={})=>{
    trackedFiles.set(url.pathname.slice(contentsPrefix.length),sha);
    blobs.set(sha,buffer);return json({content:{sha}});
   }
-  const sha=url.pathname.split('/').pop();if(blobs.has(sha))return new Response(blobs.get(sha));
+  const sha = url.pathname.split('/').pop();
+  // The first full playback can finish only if the next part is requested
+  // while the first response body is still in progress.
+  if (sha === 'chunk1' && streamFirstPart) {
+   streamFirstPart = false;
+   return new Response(new ReadableStream({
+    start(controller) {
+     controller.enqueue(blobs.get(sha).subarray(0, 2));
+     finishFirstPart = () => {
+      controller.enqueue(blobs.get(sha).subarray(2));
+      controller.close();
+     };
+    },
+    cancel() { finishFirstPart = undefined; }
+   }));
+  }
+  if (sha === 'chunk2' && finishFirstPart) {
+   finishFirstPart();
+   finishFirstPart = undefined;
+  }
+  if (blobs.has(sha)) return new Response(blobs.get(sha));
   throw Error('Unexpected GitHub path '+url.pathname);
  }
  return realFetch(input,options);

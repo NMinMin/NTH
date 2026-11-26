@@ -18,7 +18,7 @@ test('API permissions and cross-part streaming',async t=>{
  assert.equal(library.videos[0].name,'Nghịch Thủy Hàn.mp4');
  const response=await fetch(base+'/api/videos/'+id+'/link',{headers});assert.equal(response.status,200);
  const {url}=await response.json();
- const full=await fetch(base+url);assert.equal(full.status,200);assert.equal(await full.text(),'abcdefghij');
+ const full=await fetch(base+url,{signal:AbortSignal.timeout(5000)});assert.equal(full.status,200);assert.equal(await full.text(),'abcdefghij');
  const range=await fetch(base+url,{headers:{Range:'bytes=3-7'}});assert.equal(range.status,206);assert.equal(range.headers.get('content-range'),'bytes 3-7/10');assert.equal(await range.text(),'defgh');
  const suffix=await fetch(base+url,{headers:{Range:'bytes=-2'}});assert.equal(await suffix.text(),'ij');
  assert.equal((await fetch(base+url,{headers:{Range:'bytes=10-'}})).status,416);
